@@ -1,0 +1,128 @@
+# Compile l'application sur les serveurs de GitHub et publie l'APK.
+#
+# Raison d'etre : cette application se compile normalement depuis un ordinateur
+# avec Android Studio. Ce fichier permet de s'en passer entierement -- tout se
+# declenche et se recupere depuis un navigateur de telephone.
+#
+# Utilisation depuis le telephone :
+#   1. github.com/ismacous/JobMaker -> onglet "Actions"
+#   2. "Construire l'APK" -> "Run workflow"
+#   3. Attendre ~20 minutes, puis onglet "Releases" -> telecharger JobMaker.apk
+
+name: Construire l'APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+permissions:
+  contents: write
+
+jobs:
+  construire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Recuperer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache des dependances Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Installer le NDK et CMake
+        run: |
+          set -e
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1"
+
+      - name: Tests unitaires
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      # La premiere execution compile llama.cpp depuis les sources : compter
+      # une quinzaine de minutes.
+      - name: Construire l'APK
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Preparer le fichier
+        id: apk
+        run: |
+          set -e
+          SOURCE=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          test -n "$SOURCE"
+          cp "$SOURCE" JobMaker.apk
+          echo "taille=$(du -h JobMaker.apk | cut -f1)" >> "$GITHUB_OUTPUT"
+          ls -la JobMaker.apk
+
+      - name: Rapport de tests en cas d'echec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapports-de-tests
+          path: app/build/reports/
+          retention-days: 7
+
+      - name: Deposer l'APK en piece jointe
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobMaker-apk
+          path: JobMaker.apk
+          retention-days: 30
+
+      # La release donne un lien .apk direct, installable d'un seul appui
+      # depuis le navigateur du telephone. Une piece jointe de workflow, elle,
+      # arrive sous forme de .zip : beaucoup moins pratique sur mobile.
+      - name: Rediger les notes de version
+        run: |
+          {
+            echo "### Installation depuis le telephone"
+            echo
+            echo "1. Appuyer sur **JobMaker.apk** ci-dessous pour le telecharger."
+            echo "2. Ouvrir le fichier telecharge. Android demandera l'autorisation"
+            echo "   d'installer des applications depuis cette source : l'accorder."
+            echo "3. Ouvrir JobMaker et telecharger un modele d'IA depuis l'ecran"
+            echo "   d'accueil (en Wi-Fi, environ 2,5 Go)."
+            echo
+            echo "Cette version s'installe par-dessus la precedente sans effacer"
+            echo "votre profil ni vos candidatures."
+            echo
+            echo "Taille de l'APK : ${{ steps.apk.outputs.taille }}"
+            echo
+            echo "_Construit automatiquement depuis le commit ${{ github.sha }}._"
+          } > notes-de-version.md
+          cat notes-de-version.md
+
+      - name: Publier la version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="v${{ github.run_number }}"
+          gh release create "$TAG" JobMaker.apk \
+            --title "JobMaker $TAG" \
+            --latest \
+            --notes-file notes-de-version.md
+          echo "Publie : $(gh release view "$TAG" --json url --jq .url)"

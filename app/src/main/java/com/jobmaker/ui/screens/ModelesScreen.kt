@@ -30,6 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -66,6 +67,7 @@ fun ModelesScreen(vm: ModelsViewModel, onRetour: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     var aSupprimer by remember { mutableStateOf<String?>(null) }
     var infoMoteur by remember { mutableStateOf("") }
+    var lienModele by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { infoMoteur = vm.infoMoteur() }
     LaunchedEffect(message) {
@@ -108,7 +110,9 @@ fun ModelesScreen(vm: ModelsViewModel, onRetour: () -> Unit) {
             Bandeau(
                 "Les modeles se telechargent une seule fois et fonctionnent ensuite " +
                     "entierement hors ligne. Espace disponible : " +
-                    formatBytes(vm.espaceLibre) + ".",
+                    formatBytes(vm.espaceLibre) + ".\n\n" +
+                    "Gardez l'application ouverte pendant le telechargement. S'il " +
+                    "s'interrompt, il reprend la ou il s'etait arrete.",
                 TypeBandeau.INFO,
             )
 
@@ -180,6 +184,84 @@ fun ModelesScreen(vm: ModelsViewModel, onRetour: () -> Unit) {
                 )
             }
 
+            // --- telechargement par lien ---
+            Text(
+                "Telecharger depuis un lien",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(top = 16.dp, bottom = 2.dp),
+            )
+            Text(
+                "Si un modele du catalogue refuse de se telecharger (erreur 404), c'est que " +
+                    "son depot a change de nom. Cherchez-le sur huggingface.co depuis le " +
+                    "navigateur du telephone, appuyez longuement sur le bouton de " +
+                    "telechargement du fichier .gguf, copiez le lien, et collez-le ici.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = lienModele,
+                onValueChange = { lienModele = it },
+                label = { Text("https://huggingface.co/.../fichier.gguf") },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                singleLine = true,
+                shape = MaterialTheme.shapes.small,
+            )
+            val etatLien = telechargements[vm.idDepuisLien(lienModele)]
+            when {
+                lienModele.isBlank() -> Unit
+
+                etatLien is DownloadState.Running -> Column(Modifier.padding(top = 6.dp)) {
+                    LinearProgressIndicator(
+                        progress = { etatLien.fraction.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        if (etatLien.bytesTotal > 0)
+                            "${formatBytes(etatLien.bytesDone)} / " +
+                                "${formatBytes(etatLien.bytesTotal)} · " +
+                                "${formatBytes(etatLien.bytesPerSecond)}/s"
+                        else "${formatBytes(etatLien.bytesDone)} recus",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    TextButton(onClick = { vm.annuler(vm.idDepuisLien(lienModele)) }) {
+                        Text("Annuler")
+                    }
+                }
+
+                etatLien is DownloadState.Resolving -> Text(
+                    etatLien.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+
+                etatLien is DownloadState.Failed -> Column(Modifier.padding(top = 6.dp)) {
+                    Text(
+                        etatLien.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Button(onClick = { vm.telechargerDepuisLien(lienModele) }) {
+                        Text("Reessayer")
+                    }
+                }
+
+                etatLien is DownloadState.Done -> Text(
+                    "Modele installe.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+
+                else -> Button(
+                    onClick = { vm.telechargerDepuisLien(lienModele) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                ) {
+                    Icon(Icons.Default.Download, null, Modifier.size(18.dp))
+                    Text("  Telecharger ce fichier")
+                }
+            }
+
             // --- import manuel ---
             Text(
                 "Import manuel",
@@ -187,9 +269,9 @@ fun ModelesScreen(vm: ModelsViewModel, onRetour: () -> Unit) {
                 modifier = Modifier.padding(top = 16.dp, bottom = 2.dp),
             )
             Text(
-                "Si vous preferez telecharger un fichier .gguf depuis un ordinateur, " +
-                    "transferez-le sur le telephone puis importez-le ici. N'importe quel " +
-                    "modele au format GGUF fonctionne.",
+                "Si vous avez deja un fichier .gguf sur le telephone (telecharge avec le " +
+                    "navigateur, recu par transfert), importez-le ici. N'importe quel modele " +
+                    "au format GGUF fonctionne.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

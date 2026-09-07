@@ -80,7 +80,9 @@ fun BienvenueScreen(
             numero = "2",
             titre = "Un modele a telecharger, une seule fois",
             texte = "C'est le cerveau de l'application : environ 2,5 Go a recuperer en Wi-Fi. " +
-                "Ensuite, tout fonctionne hors ligne, y compris sans forfait.",
+                "Gardez l'application ouverte le temps du telechargement -- s'il " +
+                "s'interrompt, il reprendra ou il en etait. Ensuite, tout fonctionne hors " +
+                "ligne, y compris sans forfait.",
         )
         Etape(
             numero = "3",

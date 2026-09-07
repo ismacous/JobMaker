@@ -1,6 +1,49 @@
 # Compilation
 
-## Prérequis
+## Sans ordinateur : GitHub Actions
+
+`.github/workflows/construire-apk.yml` compile l'application sur les serveurs
+de GitHub et publie l'APK en *release*. C'est la voie normale pour ce projet :
+elle ne demande qu'un navigateur de téléphone.
+
+Le workflow se déclenche automatiquement à chaque poussée sur `main` ou sur une
+branche `claude/**`, et manuellement depuis l'onglet *Actions* → *Construire
+l'APK* → *Run workflow*.
+
+Il installe le SDK, le NDK 27.2.12479018 et CMake 3.22.1 sur le runner, lance
+les tests unitaires, compile l'APK de debug, puis crée une release taguée
+`v<numéro d'exécution>` avec `JobMaker.apk` en pièce jointe. Le lien
+`releases/latest` pointe donc toujours vers la dernière version. L'APK est aussi
+déposé en artefact de workflow (sous forme de `.zip`, moins pratique sur
+téléphone).
+
+Les tests passent **avant** la compilation : une régression empêche la
+publication d'une version cassée.
+
+Durée : 15 à 25 minutes, dominée par la compilation de llama.cpp. Les
+dépendances Gradle sont mises en cache d'une exécution à l'autre ; le code natif
+est recompilé chaque fois (un cache `.cxx` périmé provoque des échecs plus
+difficiles à diagnostiquer que le temps qu'il fait gagner).
+
+## Pourquoi une clé de signature est versionnée
+
+`debug.keystore` est dans le dépôt, avec son mot de passe en clair dans
+`app/build.gradle.kts`. C'est délibéré.
+
+Android refuse d'installer une application par-dessus une autre signée avec une
+clé différente. Sans clé stable, chaque compilation GitHub produirait une
+signature différente, et chaque mise à jour imposerait de désinstaller
+l'application — donc de perdre son profil et ses candidatures.
+
+Le risque réel est nul ici : l'application n'est publiée sur aucun magasin, et
+c'est exactement le rôle du `debug.keystore` que tout projet Android partage
+entre ses développeurs (Google en documente publiquement le mot de passe). Pour
+une véritable diffusion, il faudrait une clé privée gardée hors du dépôt et
+injectée par un secret GitHub.
+
+## Avec un ordinateur
+
+### Prérequis
 
 | Outil | Version | Où l'installer |
 |-------|---------|----------------|
@@ -13,7 +56,7 @@
 Le NDK et CMake ne sont pas installés par défaut : il faut cocher les cases
 « Show Package Details » dans le SDK Manager pour choisir la version exacte.
 
-## Commandes
+### Commandes
 
 ```bash
 ./gradlew assembleDebug        # produit app/build/outputs/apk/debug/app-debug.apk
@@ -78,13 +121,16 @@ en plus). **Ne l'activez qu'après avoir réussi une compilation CPU** et gardez
 de quoi revenir en arrière. Une fois activé, le curseur *Couches déportées sur
 le GPU* des réglages devient utile ; sinon il reste sans effet.
 
-## Signature de release
+## Build de release
 
-Le build `debug` suffit pour un usage personnel : il s'installe et fonctionne
-sans limite de durée.
+Le build `debug` est celui que produit GitHub Actions et il suffit pour un usage
+personnel : il s'installe et fonctionne sans limite de durée. Il n'est pas
+minifié, ce qui le rend plus gros mais évite tout risque que R8 supprime par
+erreur du code atteint par réflexion — un risque qu'on ne peut pas prendre à la
+légère sur une application qu'on ne peut pas déboguer facilement.
 
-Pour produire un APK `release` (plus petit et plus rapide au démarrage), créez
-un fichier `keystore.properties` à la racine du projet :
+Pour produire un APK `release` avec votre propre clé, créez un fichier
+`keystore.properties` à la racine du projet :
 
 ```properties
 storeFile=ma-cle.jks
@@ -93,8 +139,8 @@ keyAlias=jobmaker
 keyPassword=...
 ```
 
-puis `./gradlew assembleRelease`. Sans ce fichier, le build release n'est pas
-signé et ne s'installera pas.
+puis `./gradlew assembleRelease`. Sans ce fichier, le build release retombe sur
+la clé de debug versionnée.
 
 ## Points non vérifiés
 
@@ -111,7 +157,9 @@ Concrètement, attendez-vous à devoir éventuellement corriger :
   (`app/src/main/assets/models_catalog.json`). L'application interroge l'API de
   HuggingFace pour trouver le bon nom de fichier, donc un fichier renommé n'est
   pas un problème ; en revanche un dépôt renommé ou supprimé donnera une erreur
-  404 au téléchargement. L'import manuel d'un `.gguf` contourne le problème.
+  404 au téléchargement. Deux contournements existent dans l'application, tous
+  deux utilisables depuis un téléphone seul : *Télécharger depuis un lien* et
+  *Importer un fichier .gguf*.
 - **Des détails d'interface** — un espacement, une couleur, une marge.
 
 La logique testée (récupération du JSON des modèles, détection des inventions,

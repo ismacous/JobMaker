@@ -49,11 +49,32 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
             container.modelManager.download(model)
             // Premier modele installe : on l'affecte a tous les roles pour que
             // l'application soit immediatement utilisable.
-            if (container.modelManager.installed.value.size == 1) {
-                container.settingsRepository.setModelePourTousLesRoles(model.id)
+            val installesApres = container.modelManager.installed.value
+            if (installesApres.size == 1) {
+                container.settingsRepository.setModelePourTousLesRoles(installesApres.first().id)
             }
         }
     }
+
+    /**
+     * Telecharge un GGUF depuis un lien colle. Recours quand un depot du
+     * catalogue a change de nom : on retrouve le fichier depuis le navigateur
+     * du telephone et on colle son lien.
+     */
+    fun telechargerDepuisLien(url: String) {
+        val id = container.modelManager.idDepuisUrl(url)
+        if (travaux[id]?.isActive == true) return
+        travaux[id] = viewModelScope.launch(Dispatchers.IO) {
+            container.modelManager.downloadFromUrl(url)
+            val installesApres = container.modelManager.installed.value
+            if (installesApres.size == 1) {
+                container.settingsRepository.setModelePourTousLesRoles(installesApres.first().id)
+            }
+        }
+    }
+
+    /** Cle de suivi de l'avancement pour un lien donne. */
+    fun idDepuisLien(url: String): String = container.modelManager.idDepuisUrl(url)
 
     fun annuler(modelId: String) {
         container.modelManager.cancelDownload(modelId)

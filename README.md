@@ -66,23 +66,76 @@ Relisez toujours avant d'envoyer : c'est votre nom qui part.
 
 ---
 
-## Installation
+## Installation — depuis le téléphone seulement
 
-Il n'y a pas de version sur le Play Store : l'application est faite pour un seul
-utilisateur, il faut donc la compiler soi-même une fois.
+Il n'y a pas de version sur le Play Store : l'application n'est faite que pour
+vous. Mais **vous n'avez pas besoin d'ordinateur** : GitHub la compile sur ses
+serveurs et vous donne un fichier à installer.
 
-### Ce qu'il faut
+### 1. Lancer la compilation (une fois)
 
-- **Android Studio** (version récente, Ladybug ou plus récent)
-- Depuis Android Studio → *Settings → Languages & Frameworks → Android SDK →
-  SDK Tools*, cocher et installer :
-  - **NDK (Side by side)** version **27.2.12479018**
-  - **CMake** version **3.22.1**
-- Un câble USB et le **débogage USB** activé sur le téléphone
-  (*Paramètres → À propos → appuyer 7 fois sur « Numéro de build »*, puis
-  *Options pour les développeurs → Débogage USB*)
+Depuis le navigateur du téléphone :
 
-### Compiler et installer
+1. Aller sur **github.com/ismacous/JobMaker**, se connecter.
+2. Onglet **Actions** (si le menu est replié, appuyer sur `☰`).
+3. Dans la colonne de gauche, choisir **« Construire l'APK »**.
+4. Bouton **« Run workflow »** → **« Run workflow »**.
+
+La compilation prend **15 à 25 minutes** (le moteur d'IA est compilé en code
+natif). Vous pouvez fermer le navigateur, ça continue sur les serveurs de
+GitHub.
+
+En réalité, une compilation part déjà automatiquement à chaque modification du
+code : il y a donc peut-être déjà un fichier prêt. Vérifiez l'étape 2 avant de
+lancer quoi que ce soit.
+
+### 2. Installer l'application
+
+1. Aller sur **github.com/ismacous/JobMaker/releases/latest**
+   (à mettre en favori : ce lien pointe toujours vers la dernière version).
+2. Appuyer sur **JobMaker.apk** pour le télécharger.
+3. Ouvrir le fichier téléchargé (notification de téléchargement, ou
+   *My Files → Téléchargements*).
+4. Android affiche « Par mesure de sécurité, votre téléphone n'est pas
+   autorisé… » → **Paramètres** → activer l'autorisation pour le navigateur →
+   revenir en arrière → **Installer**.
+5. Un avertissement Play Protect peut apparaître : **Installer quand même**.
+   C'est normal pour une application qui ne vient pas du Play Store.
+
+Les mises à jour s'installent **par-dessus** la précédente sans effacer votre
+profil ni vos candidatures : l'application est signée avec une clé stable
+versionnée dans le dépôt.
+
+### 3. Mettre l'IA dedans
+
+Tout se fait dans l'application, en Wi-Fi, sans ordinateur :
+
+1. L'écran d'accueil propose le modèle recommandé (**Qwen3 4B Instruct Q4**,
+   environ 2,5 Go). Appuyer sur **Télécharger**.
+2. **Gardez l'application ouverte** pendant le téléchargement. S'il
+   s'interrompt (écran verrouillé longtemps, Wi-Fi coupé), il reprend là où il
+   s'était arrêté au relancement — rien n'est perdu.
+3. Profitez de l'attente pour remplir l'onglet **Profil**. C'est l'étape la
+   plus longue et de loin la plus rentable : tout le reste en dépend.
+
+Ensuite, plus besoin d'internet du tout : collez une offre dans **Candidater**
+et lancez.
+
+### Si le téléchargement du modèle échoue (erreur 404)
+
+Cela veut dire que le dépôt HuggingFace a été renommé depuis l'écriture de
+l'application. Trois solutions, toutes réalisables depuis le téléphone :
+
+- **Essayer un autre modèle** du catalogue. Il y en a sept.
+- **Coller un lien direct** : chercher le modèle sur *huggingface.co* dans le
+  navigateur du téléphone, onglet *Files*, appui long sur la flèche de
+  téléchargement du fichier `.gguf` → *Copier le lien*, puis dans l'application
+  *Réglages → Modèles d'IA → Télécharger depuis un lien*.
+- **Télécharger avec le navigateur** puis *Modèles d'IA → Importer un fichier
+  .gguf*. Attention : cette méthode occupe temporairement deux fois la taille du
+  modèle sur le téléphone.
+
+### Et si vous avez un jour accès à un ordinateur
 
 ```bash
 git clone https://github.com/ismacous/JobMaker.git
@@ -90,22 +143,8 @@ cd JobMaker
 ./gradlew installDebug        # téléphone branché en USB
 ```
 
-Ou, dans Android Studio : ouvrir le dossier, laisser la synchronisation Gradle
-se terminer, choisir le téléphone dans la liste des appareils, appuyer sur *Run*.
-
-La **première compilation est longue** (10 à 25 minutes) : le moteur
-d'inférence llama.cpp est téléchargé et compilé en code natif pour le
-processeur du téléphone. Les compilations suivantes prennent quelques secondes.
-
-### Au premier lancement
-
-1. L'écran d'accueil propose de télécharger le modèle recommandé
-   (**Qwen3 4B Instruct Q4**, environ 2,5 Go). À faire en Wi-Fi.
-2. Pendant le téléchargement, remplissez l'onglet **Profil**. C'est l'étape la
-   plus longue et de loin la plus rentable : tout le reste en dépend.
-3. Collez une offre dans **Candidater** et lancez.
-
----
+Il faut alors Android Studio avec le **NDK 27.2.12479018** et **CMake 3.22.1**.
+Détails dans [`docs/BUILD.md`](docs/BUILD.md). Ce n'est en aucun cas nécessaire.
 
 ## Quel modèle choisir
 
@@ -162,10 +201,9 @@ voulez.**
 
 **« Aucun modèle installé »** → *Réglages → Modèles d'IA* → télécharger.
 
-**Le téléchargement échoue (erreur 404)** → le dépôt HuggingFace a été renommé.
-Deux solutions : essayer un autre modèle du catalogue, ou télécharger le fichier
-`.gguf` depuis un ordinateur et l'importer avec *Modèles d'IA → Importer un
-fichier .gguf*. N'importe quel modèle au format GGUF fonctionne.
+**Le téléchargement du modèle échoue (erreur 404)** → voir *Installation → Si le
+téléchargement du modèle échoue* plus haut. Trois solutions, toutes faisables
+depuis le téléphone.
 
 **L'application se ferme pendant une génération** → manque de mémoire. Dans
 l'ordre : fermer les autres applications, réduire la *fenêtre de contexte*
@@ -182,7 +220,13 @@ pour cette offre. Passer au 4B si vous utilisez le 1.7B, ou au 8B.
 aussi quand il chauffe : laisser l'écran allumé et ne pas le tenir en main
 pendant la génération aide.
 
-**La compilation native échoue** → voir `docs/BUILD.md`.
+**La compilation GitHub échoue** → onglet *Actions* → ouvrir l'exécution en
+rouge → l'étape rouge affiche le message. Voir la section « Si la compilation
+native échoue » de [`docs/BUILD.md`](docs/BUILD.md).
+
+**Le téléchargement du modèle s'arrête tout seul** → Android a mis
+l'application en veille. Relancez-le : il reprend où il en était. Brancher le
+téléphone au chargeur et laisser l'écran allumé évite le problème.
 
 ---
 
@@ -195,9 +239,9 @@ pendant la génération aide.
 
 ## Tests
 
-```bash
-./gradlew testDebugUnitTest
-```
+Ils tournent automatiquement à chaque compilation GitHub, avant la production de
+l'APK : une régression empêche la publication d'une version cassée. Sur un
+ordinateur : `./gradlew testDebugUnitTest`.
 
 24 tests couvrent les parties où une régression serait la plus coûteuse : la
 récupération du JSON produit par le modèle, la détection des inventions, et le

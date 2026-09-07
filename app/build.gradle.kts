@@ -60,9 +60,26 @@ android {
     }
 
     signingConfigs {
+        // Cle de signature versionnee avec le projet, volontairement.
+        //
+        // L'application est compilee par GitHub Actions et installee depuis un
+        // telephone. Sans cle stable, chaque build serait signe differemment et
+        // Android refuserait de l'installer par-dessus le precedent : il
+        // faudrait desinstaller, donc perdre son profil, a chaque mise a jour.
+        //
+        // Ce n'est pas un secret compromis : c'est l'equivalent du
+        // debug.keystore que tout projet Android partage, pour une application
+        // qui n'est publiee sur aucun magasin. Pour une vraie diffusion, il
+        // faudrait une cle privee gardee hors du depot.
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "jobmaker"
+            keyAlias = "jobmaker"
+            keyPassword = "jobmaker"
+        }
+
         // Signature de release optionnelle : si keystore.properties existe a la
-        // racine du projet, les builds release sont signes avec. Sinon, seul le
-        // build debug est utilisable (largement suffisant pour un usage perso).
+        // racine du projet, les builds release l'utilisent.
         val keystorePropsFile = rootProject.file("keystore.properties")
         if (keystorePropsFile.exists()) {
             create("release") {
@@ -76,16 +93,18 @@ android {
     }
 
     buildTypes {
+        // Pas de suffixe d'identifiant : c'est ce build qui est installe sur le
+        // telephone, il doit porter l'identifiant definitif de l'application.
         debug {
             isMinifyEnabled = false
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("debug")
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
 

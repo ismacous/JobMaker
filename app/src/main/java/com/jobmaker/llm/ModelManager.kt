@@ -128,37 +128,85 @@ class ModelManager(private val context: Context) {
      * grace a l'en-tete Range : sur un fichier de plusieurs gigaoctets et un
      * reseau mobile, tout reprendre de zero serait rageant.
      */
-    suspend fun download(model: CatalogModel) = withContext(Dispatchers.IO) {
-        synchronized(this@ModelManager) { cancelled.remove(model.id) }
-        setState(model.id, DownloadState.Resolving("Recherche du fichier sur HuggingFace..."))
+    suspend fun download(model: CatalogModel) = telecharger(
+        id = model.id,
+        tailleAttendueOctets = model.approxSizeMb * 1_048_576L,
+        messageResolution = "Recherche du fichier sur HuggingFace...",
+        resoudreUrl = { resolveDownloadUrl(model) },
+    )
 
-        val target = File(modelsDir, model.fileName)
-        val partial = File(modelsDir, model.fileName + ".part")
+    /**
+     * Telecharge un GGUF depuis un lien copie a la main.
+     *
+     * Seule issue quand un depot du catalogue a ete renomme ou supprime et
+     * qu'on ne dispose pas d'un ordinateur : on retrouve le fichier sur le site
+     * de HuggingFace depuis le navigateur du telephone, on copie le lien de
+     * telechargement, et on le colle ici.
+     */
+    suspend fun downloadFromUrl(url: String) {
+        val propre = url.trim()
+        if (!propre.startsWith("http://") && !propre.startsWith("https://")) {
+            setState(idDepuisUrl(propre), DownloadState.Failed(
+                "Ce n'est pas un lien. Un lien commence par https://"
+            ))
+            return
+        }
+        telecharger(
+            id = idDepuisUrl(propre),
+            tailleAttendueOctets = 0L,   // taille inconnue avant la reponse du serveur
+            messageResolution = "Connexion...",
+            resoudreUrl = { propre },
+        )
+    }
+
+    /**
+     * Identifiant deduit d'une URL. L'interface s'en sert pour suivre
+     * l'avancement avant meme que le telechargement ne commence.
+     */
+    fun idDepuisUrl(url: String): String =
+        url.substringBefore('?')
+            .substringAfterLast('/')
+            .removeSuffix(".gguf")
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .take(80)
+            .ifBlank { "modele-telecharge" }
+
+    private suspend fun telecharger(
+        id: String,
+        tailleAttendueOctets: Long,
+        messageResolution: String,
+        resoudreUrl: () -> String,
+    ) = withContext(Dispatchers.IO) {
+        synchronized(this@ModelManager) { cancelled.remove(id) }
+        setState(id, DownloadState.Resolving(messageResolution))
+
+        val target = File(modelsDir, "$id.gguf")
+        val partial = File(modelsDir, "$id.gguf.part")
 
         try {
-            val needed = model.approxSizeMb * 1_048_576L
             val free = freeSpaceBytes()
-            if (free in 1 until needed) {
+            if (tailleAttendueOctets > 0 && free in 1 until tailleAttendueOctets) {
                 throw IOException(
-                    "Espace insuffisant : ${formatBytes(needed)} necessaires, " +
+                    "Espace insuffisant : ${formatBytes(tailleAttendueOctets)} necessaires, " +
                         "${formatBytes(free)} disponibles."
                 )
             }
 
-            val url = resolveDownloadUrl(model)
-            Log.i(TAG, "Telechargement de ${model.id} depuis $url")
-            downloadTo(model.id, url, partial)
+            val url = resoudreUrl()
+            Log.i(TAG, "Telechargement de $id depuis $url")
+            downloadTo(id, url, partial)
 
-            if (isCancelled(model.id)) {
-                setState(model.id, DownloadState.Idle)
+            if (isCancelled(id)) {
+                setState(id, DownloadState.Idle)
                 return@withContext
             }
 
             if (!verifyGguf(partial)) {
                 partial.delete()
                 throw IOException(
-                    "Le fichier telecharge n'est pas un GGUF valide. Le depot a peut-etre " +
-                        "change de contenu, ou le telechargement a renvoye une page d'erreur."
+                    "Le fichier recu n'est pas un modele GGUF. Le lien pointe peut-etre vers " +
+                        "une page web plutot que vers le fichier lui-meme : sur HuggingFace, " +
+                        "il faut le lien du bouton de telechargement, pas celui de la page."
                 )
             }
 
@@ -166,10 +214,10 @@ class ModelManager(private val context: Context) {
             if (!partial.renameTo(target)) throw IOException("Impossible de finaliser le fichier.")
 
             refreshInstalled()
-            setState(model.id, DownloadState.Done)
+            setState(id, DownloadState.Done)
         } catch (e: Exception) {
-            Log.e(TAG, "Echec du telechargement de ${model.id}", e)
-            setState(model.id, DownloadState.Failed(e.message ?: "Erreur inconnue"))
+            Log.e(TAG, "Echec du telechargement de $id", e)
+            setState(id, DownloadState.Failed(e.message ?: "Erreur inconnue"))
         }
     }
 
