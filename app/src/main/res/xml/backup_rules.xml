@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Le profil et les candidatures sont sauvegardes ; les modeles (plusieurs
+         gigaoctets) sont exclus : ils se retelechargent. -->
+    <include domain="database" path="." />
+    <include domain="sharedpref" path="." />
+    <exclude domain="file" path="models/" />
+    <exclude domain="file" path="exports/" />
+</full-backup-content>
