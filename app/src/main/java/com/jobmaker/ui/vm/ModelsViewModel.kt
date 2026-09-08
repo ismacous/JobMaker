@@ -129,6 +129,7 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
                     ),
                     threads = reglagesActuels.threads,
                     gpuLayers = reglagesActuels.couchesGpu,
+                    chargerEnMemoire = reglagesActuels.chargerEnMemoire,
                 )
                 val charge = System.currentTimeMillis()
                 val reponse = container.llmRuntime.complete(

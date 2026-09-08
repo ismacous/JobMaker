@@ -20,6 +20,8 @@ data class LoadedModelInfo(
     val filePath: String,
     val contextSize: Int,
     val description: String,
+    /** Vrai si les poids ont ete copies en memoire au lieu d'etre mappes. */
+    val enMemoire: Boolean = false,
 )
 
 /**
@@ -63,9 +65,12 @@ class LlmRuntime(
         contextSize: Int,
         threads: Int = defaultThreads(),
         gpuLayers: Int = 0,
+        chargerEnMemoire: Boolean = false,
     ): LoadedModelInfo = mutex.withLock {
         val existing = loaded
-        if (existing != null && existing.modelId == modelId && existing.contextSize == contextSize) {
+        if (existing != null && existing.modelId == modelId &&
+            existing.contextSize == contextSize && existing.enMemoire == chargerEnMemoire
+        ) {
             return@withLock existing
         }
         withContext(dispatcher) {
@@ -76,7 +81,10 @@ class LlmRuntime(
                         "de l'application (compilation sans NDK)."
                 )
             }
-            val h = LlamaBridge.nativeLoad(filePath, contextSize, threads, gpuLayers)
+            val h = LlamaBridge.nativeLoad(
+                filePath, contextSize, threads, gpuLayers,
+                /* useMmap = */ !chargerEnMemoire,
+            )
             if (h == 0L) {
                 throw LlmException(
                     "Impossible de charger le modele. Fichier corrompu, format GGUF " +
@@ -89,6 +97,7 @@ class LlmRuntime(
                 filePath = filePath,
                 contextSize = LlamaBridge.nativeContextSize(h),
                 description = LlamaBridge.nativeDescribe(h) ?: modelId,
+                enMemoire = chargerEnMemoire,
             )
             loaded = info
             Log.i(TAG, "Modele resident : ${info.description}")

@@ -30,14 +30,20 @@ if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-foreach(conf DEBUG RELWITHDEBINFO MINSIZEREL)
+foreach(conf DEBUG RELWITHDEBINFO MINSIZEREL RELEASE)
     set(CMAKE_C_FLAGS_${conf}   "-O3 -DNDEBUG")
     set(CMAKE_CXX_FLAGS_${conf} "-O3 -DNDEBUG")
 endforeach()
-set(CMAKE_C_FLAGS_RELEASE   "-O3 -DNDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
-message(STATUS "JobMaker : build natif ${CMAKE_BUILD_TYPE}, C=${CMAKE_C_FLAGS_${CMAKE_BUILD_TYPE}}")
+# Ceinture et bretelles : add_compile_options place ses drapeaux APRES les
+# CMAKE_<LANG>_FLAGS_<CONFIG> sur la ligne de commande. Comme c'est le dernier
+# -O rencontre qui gagne, -O3 s'impose meme si l'outillage reinjecte un -O0
+# plus tard. A declarer avant llama.cpp pour que ses cibles en heritent.
+add_compile_options(-O3)
+
+message(STATUS "JobMaker/natif : CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+message(STATUS "JobMaker/natif : C_FLAGS=${CMAKE_C_FLAGS} | par config="
+               "${CMAKE_C_FLAGS_${CMAKE_BUILD_TYPE}} | plus add_compile_options(-O3)")
 
 if (POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)

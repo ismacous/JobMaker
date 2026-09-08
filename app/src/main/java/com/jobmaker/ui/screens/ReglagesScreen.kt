@@ -297,6 +297,21 @@ fun ReglagesScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                LigneInterrupteur(
+                    titre = "Charger le modele entierement en memoire",
+                    detail = "Par defaut, les poids du modele restent des pages du fichier, " +
+                        "lues a la demande : l'ouverture est immediate. Mais si Android " +
+                        "manque de memoire, il evince ces pages et doit les relire depuis " +
+                        "le stockage -- sur 2,5 Go relus a chaque mot produit, la vitesse " +
+                        "s'effondre.\n\n" +
+                        "Active, tout est copie en memoire une fois pour toutes : " +
+                        "l'ouverture prend une dizaine de secondes, puis le debit reste " +
+                        "constant. A essayer si la generation est anormalement lente. " +
+                        "Si l'application se ferme d'elle-meme, desactivez.",
+                    valeur = reglages.chargerEnMemoire,
+                    onChange = vm::setChargerEnMemoire,
+                )
             }
 
             SectionCarte("Confidentialite", replierParDefaut = true) {

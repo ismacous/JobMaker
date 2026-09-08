@@ -186,14 +186,22 @@ void clear_kv(Session* s) {
 JNI_FN(jlong)
 Java_com_jobmaker_llm_LlamaBridge_nativeLoad(JNIEnv* env, jobject /*thiz*/,
                                              jstring jpath, jint n_ctx,
-                                             jint n_threads, jint n_gpu_layers) {
+                                             jint n_threads, jint n_gpu_layers,
+                                             jboolean use_mmap) {
     ensure_backend();
     const std::string path = to_utf8(env, jpath);
 
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = n_gpu_layers;   // ignore si aucun backend GPU n'est compile
-    mp.use_mmap     = true;           // le modele reste sur le stockage, pas en RAM
     mp.use_mlock    = false;          // mlock ferait tuer l'app par Android
+
+    // use_mmap = true : les poids restent des pages du fichier, chargees a la
+    // demande. Rapide a ouvrir, mais Android peut les evincer sous pression
+    // memoire et il faut alors les relire depuis le stockage -- ce qui, sur un
+    // modele de 2,5 Go relu a chaque token, effondre la vitesse.
+    // use_mmap = false : tout est copie en memoire anonyme une fois pour
+    // toutes. Ouverture plus lente, debit ensuite constant.
+    mp.use_mmap     = (use_mmap == JNI_TRUE);
 
     llama_model* model = llama_model_load_from_file(path.c_str(), mp);
     if (model == nullptr) {
@@ -222,7 +230,8 @@ Java_com_jobmaker_llm_LlamaBridge_nativeLoad(JNIEnv* env, jobject /*thiz*/,
     s->vocab = llama_model_get_vocab(model);
     s->n_ctx = static_cast<int>(llama_n_ctx(ctx));
 
-    LOGI("Modele charge : %s (n_ctx=%d, threads=%d)", path.c_str(), s->n_ctx, n_threads);
+    LOGI("Modele charge : %s (n_ctx=%d, threads=%d, mmap=%d)",
+         path.c_str(), s->n_ctx, n_threads, mp.use_mmap ? 1 : 0);
     return reinterpret_cast<jlong>(s);
 }
 

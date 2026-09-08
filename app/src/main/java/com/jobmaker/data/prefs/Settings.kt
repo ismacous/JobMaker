@@ -26,6 +26,11 @@ data class Settings(
     val tailleContexte: Int = 6144,
     val threads: Int = LlmRuntime.defaultThreads(),
     val couchesGpu: Int = 0,
+    /**
+     * Copier les poids en memoire au lieu de les mapper depuis le fichier.
+     * Ouverture plus lente, mais debit constant si Android evince les pages.
+     */
+    val chargerEnMemoire: Boolean = false,
     val gabaritParDefaut: String = "sobre",
     val couleurAccent: String = "#1F4E79",
     val photoSurCv: Boolean = false,
@@ -52,6 +57,7 @@ class SettingsRepository(private val context: Context) {
             tailleContexte = this[KEY_CONTEXTE] ?: 6144,
             threads = this[KEY_THREADS] ?: LlmRuntime.defaultThreads(),
             couchesGpu = this[KEY_GPU] ?: 0,
+            chargerEnMemoire = this[KEY_EN_MEMOIRE] ?: false,
             gabaritParDefaut = this[KEY_GABARIT] ?: "sobre",
             couleurAccent = this[KEY_COULEUR] ?: "#1F4E79",
             photoSurCv = this[KEY_PHOTO] ?: false,
@@ -76,6 +82,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setTailleContexte(value: Int) = context.dataStore.edit { it[KEY_CONTEXTE] = value }
     suspend fun setThreads(value: Int) = context.dataStore.edit { it[KEY_THREADS] = value }
     suspend fun setCouchesGpu(value: Int) = context.dataStore.edit { it[KEY_GPU] = value }
+    suspend fun setChargerEnMemoire(value: Boolean) =
+        context.dataStore.edit { it[KEY_EN_MEMOIRE] = value }
     suspend fun setGabarit(value: String) = context.dataStore.edit { it[KEY_GABARIT] = value }
     suspend fun setCouleurAccent(value: String) = context.dataStore.edit { it[KEY_COULEUR] = value }
     suspend fun setPhotoSurCv(value: Boolean) = context.dataStore.edit { it[KEY_PHOTO] = value }
@@ -90,6 +98,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_CONTEXTE = intPreferencesKey("taille_contexte")
         val KEY_THREADS = intPreferencesKey("threads")
         val KEY_GPU = intPreferencesKey("couches_gpu")
+        val KEY_EN_MEMOIRE = booleanPreferencesKey("charger_en_memoire")
         val KEY_GABARIT = stringPreferencesKey("gabarit")
         val KEY_COULEUR = stringPreferencesKey("couleur_accent")
         val KEY_PHOTO = booleanPreferencesKey("photo_cv")

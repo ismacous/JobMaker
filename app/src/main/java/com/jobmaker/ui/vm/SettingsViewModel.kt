@@ -30,6 +30,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun setContexte(v: Int) = lance { container.settingsRepository.setTailleContexte(v) }
     fun setThreads(v: Int) = lance { container.settingsRepository.setThreads(v) }
     fun setCouchesGpu(v: Int) = lance { container.settingsRepository.setCouchesGpu(v) }
+    fun setChargerEnMemoire(v: Boolean) =
+        lance { container.settingsRepository.setChargerEnMemoire(v) }
     fun setGabarit(v: String) = lance { container.settingsRepository.setGabarit(v) }
     fun setCouleur(v: String) = lance { container.settingsRepository.setCouleurAccent(v) }
     fun setPhoto(v: Boolean) = lance { container.settingsRepository.setPhotoSurCv(v) }

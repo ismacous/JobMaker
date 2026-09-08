@@ -27,7 +27,18 @@ internal object LlamaBridge {
     const val ERR_DECODE = -3
     const val ERR_TOKENIZE = -4
 
-    external fun nativeLoad(path: String, nCtx: Int, nThreads: Int, nGpuLayers: Int): Long
+    /**
+     * @param useMmap true : les poids restent des pages du fichier (ouverture
+     *   rapide, mais Android peut les evincer). false : tout est copie en
+     *   memoire (ouverture plus lente, debit ensuite constant).
+     */
+    external fun nativeLoad(
+        path: String,
+        nCtx: Int,
+        nThreads: Int,
+        nGpuLayers: Int,
+        useMmap: Boolean,
+    ): Long
 
     external fun nativeFree(handle: Long)
 

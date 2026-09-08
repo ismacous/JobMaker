@@ -332,6 +332,7 @@ class Orchestrator(
             contextSize = contexte,
             threads = settings.threads,
             gpuLayers = settings.couchesGpu,
+            chargerEnMemoire = settings.chargerEnMemoire,
         )
         return choisi.displayName to (entree?.emitsReasoning ?: false)
     }
