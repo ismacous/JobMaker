@@ -20,7 +20,9 @@ fois.
    LinkedIn, une annonce en vitrine…). Six agents IA s'enchaînent et produisent
    un CV et une lettre taillés pour cette offre précise.
 3. **Documents** — aperçu fidèle au PDF final, retouche manuelle de chaque
-   ligne, choix parmi quatre mises en page, export PDF ou texte, partage.
+   ligne, choix parmi quatre mises en page, export PDF, copie en texte brut
+   pour les formulaires en ligne. Le bouton **PDF** ouvre l'impression
+   d'Android : choisissez **« Enregistrer au format PDF »** et l'emplacement.
 4. **Comprendre** — vous collez une annonce dont vous ne comprenez pas
    l'intitulé et l'application vous explique le métier, le quotidien réel,
    l'ordre de grandeur du salaire, les questions à poser en entretien et les

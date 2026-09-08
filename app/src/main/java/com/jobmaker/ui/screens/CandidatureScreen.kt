@@ -41,12 +41,14 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +60,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.jobmaker.render.CvTemplates
+import com.jobmaker.render.trouverActivity
 import com.jobmaker.ui.components.ApercuHtml
 import com.jobmaker.ui.components.Bandeau
 import com.jobmaker.ui.components.JaugeScore
@@ -65,6 +68,7 @@ import com.jobmaker.ui.components.SectionCarte
 import com.jobmaker.ui.components.TypeBandeau
 import com.jobmaker.ui.vm.DocumentsViewModel
 import com.jobmaker.ui.vm.EvenementExport
+import kotlinx.coroutines.launch
 
 private val onglets = listOf("CV", "Lettre", "Offre analysee", "Relecture")
 
@@ -84,11 +88,18 @@ fun CandidatureScreen(
     val profil by vm.profile.collectAsState()
     val export by vm.export.collectAsState()
     val contexte = LocalContext.current
+    val activity = contexte.trouverActivity()
     val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    // Le moteur d'impression reclame ses pages apres l'ouverture de sa boite de
+    // dialogue : la WebView doit survivre jusque-la, et n'etre liberee qu'en
+    // quittant l'ecran.
+    DisposableEffect(Unit) { onDispose { vm.libererImpression() } }
     var ongletActif by remember { mutableIntStateOf(0) }
 
-    // Un export termine ouvre directement le selecteur de partage : c'est
-    // toujours ce qu'on veut faire d'un CV en PDF.
+    // L'export .txt termine ouvre directement le selecteur de partage. Le PDF,
+    // lui, passe par la boite de dialogue d'impression du systeme.
     LaunchedEffect(export) {
         when (val e = export) {
             is EvenementExport.Pret -> {
@@ -158,8 +169,32 @@ fun CandidatureScreen(
             }
 
             when (ongletActif) {
-                0 -> OngletCv(vm, onEditerCv, export is EvenementExport.EnCours)
-                1 -> OngletLettre(vm, onEditerLettre, export is EvenementExport.EnCours)
+                0 -> OngletCv(
+                    vm = vm,
+                    onEditer = onEditerCv,
+                    onImprimer = {
+                        if (activity == null) scope.launch {
+                            snackbar.showSnackbar("Impression indisponible sur cet ecran.")
+                        } else vm.imprimerCv(activity) { message ->
+                            scope.launch { snackbar.showSnackbar(message) }
+                        }
+                    },
+                    onPartagerTexte = vm::exporterCvTexte,
+                    exportEnCours = export is EvenementExport.EnCours,
+                )
+                1 -> OngletLettre(
+                    vm = vm,
+                    onEditer = onEditerLettre,
+                    onImprimer = {
+                        if (activity == null) scope.launch {
+                            snackbar.showSnackbar("Impression indisponible sur cet ecran.")
+                        } else vm.imprimerLettre(activity) { message ->
+                            scope.launch { snackbar.showSnackbar(message) }
+                        }
+                    },
+                    onPartagerTexte = vm::exporterLettreTexte,
+                    exportEnCours = export is EvenementExport.EnCours,
+                )
                 2 -> OngletAnalyse(c)
                 3 -> OngletRelecture(c, vm)
             }
@@ -170,7 +205,13 @@ fun CandidatureScreen(
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun OngletCv(vm: DocumentsViewModel, onEditer: () -> Unit, exportEnCours: Boolean) {
+private fun OngletCv(
+    vm: DocumentsViewModel,
+    onEditer: () -> Unit,
+    onImprimer: () -> Unit,
+    onPartagerTexte: () -> Unit,
+    exportEnCours: Boolean,
+) {
     val candidature by vm.courante.collectAsState()
     val c = candidature ?: return
     val presse = LocalClipboardManager.current
@@ -182,13 +223,8 @@ private fun OngletCv(vm: DocumentsViewModel, onEditer: () -> Unit, exportEnCours
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(
-                onClick = { vm.exporterCvPdf() },
-                enabled = !exportEnCours,
-                modifier = Modifier.weight(1f),
-            ) {
-                if (exportEnCours) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Default.PictureAsPdf, null, Modifier.size(18.dp))
+            Button(onClick = onImprimer, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.PictureAsPdf, null, Modifier.size(18.dp))
                 Text("  PDF")
             }
             OutlinedButton(onClick = onEditer) {
@@ -252,6 +288,17 @@ private fun OngletCv(vm: DocumentsViewModel, onEditer: () -> Unit, exportEnCours
                 else MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "« PDF » ouvre l'impression : choisissez « Enregistrer au format PDF ».",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = onPartagerTexte, enabled = !exportEnCours) {
+                    Text(".txt", style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
 
         ApercuHtml(vm.htmlCv(), Modifier.fillMaxSize())
@@ -259,20 +306,21 @@ private fun OngletCv(vm: DocumentsViewModel, onEditer: () -> Unit, exportEnCours
 }
 
 @Composable
-private fun OngletLettre(vm: DocumentsViewModel, onEditer: () -> Unit, exportEnCours: Boolean) {
+private fun OngletLettre(
+    vm: DocumentsViewModel,
+    onEditer: () -> Unit,
+    onImprimer: () -> Unit,
+    onPartagerTexte: () -> Unit,
+    exportEnCours: Boolean,
+) {
     val presse = LocalClipboardManager.current
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(
-                onClick = { vm.exporterLettrePdf() },
-                enabled = !exportEnCours,
-                modifier = Modifier.weight(1f),
-            ) {
-                if (exportEnCours) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Default.PictureAsPdf, null, Modifier.size(18.dp))
+            Button(onClick = onImprimer, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.PictureAsPdf, null, Modifier.size(18.dp))
                 Text("  PDF")
             }
             OutlinedButton(onClick = onEditer) {
@@ -285,12 +333,21 @@ private fun OngletLettre(vm: DocumentsViewModel, onEditer: () -> Unit, exportEnC
                 Icon(Icons.Default.ContentCopy, null, Modifier.size(18.dp))
             }
         }
-        Text(
-            "Le texte copie sert pour les formulaires en ligne qui n'acceptent pas de fichier.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "« PDF » ouvre l'impression : choisissez « Enregistrer au format PDF ». " +
+                    "Le bouton copier sert aux formulaires qui n'acceptent pas de fichier.",
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = onPartagerTexte, enabled = !exportEnCours) {
+                Text(".txt", style = MaterialTheme.typography.labelMedium)
+            }
+        }
         ApercuHtml(vm.htmlLettre(), Modifier.fillMaxSize())
     }
 }

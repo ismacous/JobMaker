@@ -1,5 +1,6 @@
 package com.jobmaker.render
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -29,15 +30,27 @@ class DocumentExporter(private val context: Context) {
     fun htmlLettre(profile: Profile, candidature: Candidature): String =
         HtmlRenderer.renderLettre(profile, candidature.lettre, candidature.couleurAccent)
 
-    suspend fun exporterCvPdf(profile: Profile, candidature: Candidature): File {
-        val nom = nomFichier("CV", profile, candidature) + ".pdf"
-        return pdf.htmlVersPdf(htmlCv(profile, candidature), File(dossierExport, nom))
-    }
+    /**
+     * Ouvre la boite de dialogue d'impression sur le CV. L'utilisateur y
+     * choisit « Enregistrer au format PDF ».
+     *
+     * Retourne null si tout va bien, sinon le message d'erreur a afficher.
+     */
+    suspend fun imprimerCv(activity: Activity, profile: Profile, candidature: Candidature): String? =
+        pdf.imprimer(activity, htmlCv(profile, candidature), nomFichier("CV", profile, candidature))
 
-    suspend fun exporterLettrePdf(profile: Profile, candidature: Candidature): File {
-        val nom = nomFichier("Lettre de motivation", profile, candidature) + ".pdf"
-        return pdf.htmlVersPdf(htmlLettre(profile, candidature), File(dossierExport, nom))
-    }
+    suspend fun imprimerLettre(
+        activity: Activity,
+        profile: Profile,
+        candidature: Candidature,
+    ): String? = pdf.imprimer(
+        activity,
+        htmlLettre(profile, candidature),
+        nomFichier("Lettre de motivation", profile, candidature),
+    )
+
+    /** A appeler quand l'ecran d'impression est refermé. */
+    fun libererImpression() = pdf.liberer()
 
     /**
      * Version texte brut. Beaucoup de formulaires de candidature en ligne

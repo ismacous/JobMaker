@@ -127,13 +127,24 @@ comparer du texte. Ce sont eux qui alimentent la passe de correction.
 
 ### PDF par le moteur d'impression d'Android
 
-`PdfExporter` charge le HTML dans un `WebView` hors écran et passe par
-`createPrintDocumentAdapter`. C'est le même moteur qui produit l'aperçu, donc
-l'aperçu est fidèle, et le PDF contient du **texte sélectionnable**.
+`PdfExporter` charge le HTML dans un `WebView` hors écran, puis confie son
+`PrintDocumentAdapter` à `PrintManager`. C'est le même moteur qui produit
+l'aperçu, donc l'aperçu est fidèle, et le PDF contient du **texte
+sélectionnable**.
 
 Ce dernier point n'est pas cosmétique : un PDF fabriqué à partir d'une capture
 d'écran est une image, illisible pour les logiciels de tri de candidatures, et
 donc écarté avant même d'atteindre un lecteur humain.
+
+Pourquoi `PrintManager` plutôt qu'un appel direct à `onLayout`/`onWrite`, qui
+aurait permis d'écrire le fichier sans aucune interaction : les classes de
+rappel de ces méthodes (`LayoutResultCallback`, `WriteResultCallback`) ont des
+constructeurs *package-private* dans `android.print` et ne peuvent donc pas
+être sous-classées depuis Kotlin — le compilateur refuse. `PrintManager` fait
+le même travail en interne et c'est l'API que le système expose officiellement.
+La contrepartie est visible pour l'utilisateur : la boîte de dialogue
+d'impression s'ouvre et il choisit « Enregistrer au format PDF » puis
+l'emplacement. L'interface le dit explicitement sous le bouton.
 
 ### Profil stocké en un seul document JSON
 

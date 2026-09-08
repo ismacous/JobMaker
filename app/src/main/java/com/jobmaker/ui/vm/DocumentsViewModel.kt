@@ -1,5 +1,6 @@
 package com.jobmaker.ui.vm
 
+import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jobmaker.agents.FactCheck
@@ -123,13 +124,31 @@ class DocumentsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun consommerExport() { _export.value = null }
 
-    fun exporterCvPdf() = exporter("application/pdf") { p, c ->
-        container.documentExporter.exporterCvPdf(p, c)
+    /**
+     * Ouvre l'ecran d'impression du systeme sur le CV.
+     *
+     * Passe par l'Activity et non par le contexte d'application : le moteur
+     * d'impression affiche une interface et refuse un contexte sans fenetre.
+     */
+    fun imprimerCv(activity: Activity, onErreur: (String) -> Unit) {
+        val candidature = _courante.value ?: return
+        viewModelScope.launch {
+            container.documentExporter
+                .imprimerCv(activity, profile.value, candidature)
+                ?.let(onErreur)
+        }
     }
 
-    fun exporterLettrePdf() = exporter("application/pdf") { p, c ->
-        container.documentExporter.exporterLettrePdf(p, c)
+    fun imprimerLettre(activity: Activity, onErreur: (String) -> Unit) {
+        val candidature = _courante.value ?: return
+        viewModelScope.launch {
+            container.documentExporter
+                .imprimerLettre(activity, profile.value, candidature)
+                ?.let(onErreur)
+        }
     }
+
+    fun libererImpression() = container.documentExporter.libererImpression()
 
     fun exporterCvTexte() = exporter("text/plain") { p, c ->
         container.documentExporter.exporterCvTexte(p, c)
@@ -141,7 +160,7 @@ class DocumentsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun texteCvPourCopie(): String {
         val c = _courante.value ?: return ""
-        return container.documentExporter.texteCv(profile.value, c)
+        return container.documentExporter.texteCv(profile.value, c.cv)
     }
 
     fun texteLettrePourCopie(): String {
