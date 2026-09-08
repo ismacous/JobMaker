@@ -20,8 +20,8 @@ internal object LlamaBridge {
         false
     }
 
-    // Codes d'erreur renvoyes par nativeBeginGenerate (voir llama_jni.cpp).
-    const val OK = 0
+    // nativeBeginGenerate renvoie le nombre de tokens du prompt quand tout va
+    // bien ; seules les valeurs negatives sont des erreurs (voir llama_jni.cpp).
     const val ERR_NO_SESSION = -1
     const val ERR_PROMPT_TOO_LONG = -2
     const val ERR_DECODE = -3
@@ -44,6 +44,7 @@ internal object LlamaBridge {
         addAssistant: Boolean,
     ): String?
 
+    /** Retourne le nombre de tokens du prompt, ou un code d'erreur negatif. */
     external fun nativeBeginGenerate(
         handle: Long,
         prompt: String,
@@ -55,6 +56,12 @@ internal object LlamaBridge {
         repeatLastN: Int,
         seed: Int,
     ): Int
+
+    /**
+     * Lit le lot suivant du prompt. Retourne le nombre de tokens lus, 0 quand
+     * le prompt est entierement lu, ou un code d'erreur negatif.
+     */
+    external fun nativeLirePromptSuivant(handle: Long): Int
 
     /** null = generation terminee. Chaine vide = UTF-8 encore incomplet. */
     external fun nativeNextPiece(handle: Long): String?

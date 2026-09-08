@@ -194,11 +194,24 @@ class ModelManager(private val context: Context) {
 
             val url = resoudreUrl()
             Log.i(TAG, "Telechargement de $id depuis $url")
-            downloadTo(id, url, partial)
+            val tailleAnnoncee = downloadTo(id, url, partial)
 
             if (isCancelled(id)) {
                 setState(id, DownloadState.Idle)
                 return@withContext
+            }
+
+            // Un GGUF tronque peut se charger sans erreur visible puis produire
+            // des resultats absurdes ou une lenteur inexplicable. On refuse donc
+            // tout fichier dont la taille ne correspond pas a l'annonce.
+            if (tailleAnnoncee > 0 && partial.length() != tailleAnnoncee) {
+                val recu = partial.length()
+                partial.delete()
+                throw IOException(
+                    "Telechargement incomplet : ${formatBytes(recu)} recus sur " +
+                        "${formatBytes(tailleAnnoncee)}. Relancez : la reprise repart " +
+                        "de la ou elle s'etait arretee."
+                )
             }
 
             if (!verifyGguf(partial)) {
@@ -261,7 +274,11 @@ class ModelManager(private val context: Context) {
         }
     }
 
-    private fun downloadTo(modelId: String, url: String, partial: File) {
+    /**
+     * Telecharge dans [partial]. Retourne la taille totale annoncee par le
+     * serveur, ou -1 si elle est inconnue.
+     */
+    private fun downloadTo(modelId: String, url: String, partial: File): Long {
         var alreadyDone = if (partial.exists()) partial.length() else 0L
 
         val builder = Request.Builder().url(url)
@@ -270,7 +287,7 @@ class ModelManager(private val context: Context) {
 
         http.newCall(builder.build()).execute().use { resp ->
             if (resp.code == 416) {           // deja complet cote serveur
-                return
+                return partial.length()
             }
             if (!resp.isSuccessful) {
                 throw IOException("Le serveur a repondu ${resp.code}. URL : $url")
@@ -294,7 +311,7 @@ class ModelManager(private val context: Context) {
                     var lastTick = System.currentTimeMillis()
                     var lastBytes = done
                     while (true) {
-                        if (isCancelled(modelId)) return
+                        if (isCancelled(modelId)) return total
                         val read = input.read(buffer)
                         if (read <= 0) break
                         output.write(buffer, 0, read)
@@ -310,6 +327,7 @@ class ModelManager(private val context: Context) {
                     output.flush()
                 }
             }
+            return total
         }
     }
 

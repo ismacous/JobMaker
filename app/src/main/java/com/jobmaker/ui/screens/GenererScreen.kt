@@ -28,16 +28,25 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jobmaker.ui.components.Bandeau
 import com.jobmaker.ui.components.TexteDefilant
 import com.jobmaker.ui.components.TypeBandeau
 import com.jobmaker.ui.vm.GenerateViewModel
+import com.jobmaker.ui.vm.PhaseGeneration
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -208,10 +217,31 @@ fun GenererScreen(
 @Composable
 private fun ProgressionGeneration(vm: GenerateViewModel) {
     val etat by vm.etat.collectAsState()
+
+    // Horloge qui avance : sans elle, impossible de savoir si le modele
+    // travaille ou si l'application est bloquee.
+    var maintenant by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(etat.enCours) {
+        while (etat.enCours) {
+            maintenant = System.currentTimeMillis()
+            delay(500)
+        }
+    }
+
+    // L'ecran reste allume pendant la generation : l'ecran eteint fait
+    // ralentir puis suspendre le calcul par Android.
+    val vue = LocalView.current
+    DisposableEffect(etat.enCours) {
+        vue.keepScreenOn = etat.enCours
+        onDispose { vue.keepScreenOn = false }
+    }
+
+    val ecoule = if (etat.debutMs == 0L) 0L else maintenant - etat.debutMs
+
     Column(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            Column(Modifier.padding(start = 12.dp)) {
+            Column(Modifier.padding(start = 12.dp).weight(1f)) {
                 Text(
                     "Etape ${etat.etapeIndex}/${etat.etapesTotal} — ${etat.etapeTitre}",
                     style = MaterialTheme.typography.titleSmall,
@@ -224,11 +254,69 @@ private fun ProgressionGeneration(vm: GenerateViewModel) {
                     )
                 }
             }
+            Text(
+                dureeCourte(ecoule),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
+
         LinearProgressIndicator(
             progress = { etat.progression },
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
         )
+
+        // --- ce que fait le modele, en clair ---
+        Spacer(Modifier.height(10.dp))
+        Text(etat.phase.libelle, style = MaterialTheme.typography.titleSmall)
+
+        when (etat.phase) {
+            PhaseGeneration.LECTURE -> {
+                LinearProgressIndicator(
+                    progress = { etat.progressionLecture },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+                Text(
+                    "${etat.promptLus} / ${etat.promptTotal} tokens" +
+                        if (etat.vitesseLecture > 0)
+                            "  ·  %.1f tokens/s".format(etat.vitesseLecture)
+                        else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+
+            PhaseGeneration.REDACTION -> {
+                val vitesse = etat.vitesseRedaction(maintenant)
+                Text(
+                    "${etat.tokensEcrits} tokens ecrits" +
+                        if (vitesse > 0) "  ·  %.1f tokens/s".format(vitesse) else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                if (etat.msLecturePrompt > 0) {
+                    Text(
+                        "Prompt lu en ${dureeCourte(etat.msLecturePrompt)} " +
+                            "(${etat.promptTotal} tokens)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            PhaseGeneration.PREPARATION -> {
+                Text(
+                    "Le modele est mis en memoire. Quelques secondes la premiere fois.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         if (etat.modeleActuel.isNotBlank()) {
             Text(
                 "Modele : ${etat.modeleActuel}",
@@ -237,6 +325,7 @@ private fun ProgressionGeneration(vm: GenerateViewModel) {
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
+
         if (etat.apercuBrut.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
             Text(
@@ -245,9 +334,23 @@ private fun ProgressionGeneration(vm: GenerateViewModel) {
             )
             TexteDefilant(etat.apercuBrut, Modifier.height(120.dp).padding(top = 4.dp))
         }
+
         OutlinedButton(
             onClick = { vm.annuler() },
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
         ) { Text("Interrompre") }
+    }
+}
+
+/** Duree lisible : 42 s, 3 min 07 s, 1 h 05 min. */
+private fun dureeCourte(ms: Long): String {
+    val totalSecondes = (ms / 1000).coerceAtLeast(0)
+    val heures = totalSecondes / 3600
+    val minutes = (totalSecondes % 3600) / 60
+    val secondes = totalSecondes % 60
+    return when {
+        heures > 0 -> "%d h %02d min".format(heures, minutes)
+        minutes > 0 -> "%d min %02d s".format(minutes, secondes)
+        else -> "$secondes s"
     }
 }

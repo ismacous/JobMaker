@@ -30,12 +30,13 @@ suspend fun <T> LlmRuntime.generateJson(
     user: String,
     params: GenerationParams,
     suppressReasoning: Boolean,
+    onLecturePrompt: ((Int, Int, Long) -> Unit)? = null,
     onToken: ((String) -> Unit)? = null,
 ): T {
     val userText = if (suppressReasoning) "$user\n\n$NO_THINK" else user
 
     val messages = listOf(ChatMessage.system(system), ChatMessage.user(userText))
-    val raw = complete(messages, params.copy(stopSequences = params.stopSequences), onToken)
+    val raw = complete(messages, params, onLecturePrompt, onToken)
 
     parseOrNull(serializer, raw)?.let { return it }
 
@@ -52,11 +53,12 @@ suspend fun <T> LlmRuntime.generateJson(
     }
 
     val repaired = complete(
-        listOf(
+        messages = listOf(
             ChatMessage.system("Tu es un correcteur de JSON. Tu ne reponds que par du JSON valide."),
             ChatMessage.user(repairPrompt),
         ),
-        GenerationParams.precise(maxTokens = params.maxTokens),
+        params = GenerationParams.precise(maxTokens = params.maxTokens),
+        onToken = onToken,
     )
 
     return parseOrNull(serializer, repaired)
@@ -79,13 +81,15 @@ suspend fun LlmRuntime.generateProse(
     user: String,
     params: GenerationParams,
     suppressReasoning: Boolean,
+    onLecturePrompt: ((Int, Int, Long) -> Unit)? = null,
     onToken: ((String) -> Unit)? = null,
 ): String {
     val userText = if (suppressReasoning) "$user\n\n$NO_THINK" else user
     val raw = complete(
-        listOf(ChatMessage.system(system), ChatMessage.user(userText)),
-        params,
-        onToken,
+        messages = listOf(ChatMessage.system(system), ChatMessage.user(userText)),
+        params = params,
+        onLecturePrompt = onLecturePrompt,
+        onToken = onToken,
     )
     return JsonRepair.cleanProse(raw)
 }

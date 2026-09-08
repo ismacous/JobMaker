@@ -40,6 +40,7 @@ import com.jobmaker.ui.components.Bandeau
 import com.jobmaker.ui.components.Champ
 import com.jobmaker.ui.components.ListeChaines
 import com.jobmaker.ui.components.SectionCarte
+import com.jobmaker.ui.components.remplacer
 import com.jobmaker.ui.components.TypeBandeau
 import com.jobmaker.ui.vm.DocumentsViewModel
 
@@ -229,6 +230,15 @@ fun EditeurCvScreen(
                                     )
                                 }
                             },
+                            onModifier = { i, v ->
+                                vm.majCv { c2 ->
+                                    c2.copy(
+                                        competences = c2.competences.toMutableList().also {
+                                            it[index] = groupe.copy(items = groupe.items.remplacer(i, v))
+                                        }
+                                    )
+                                }
+                            },
                         )
                     }
                 }
@@ -277,6 +287,9 @@ fun EditeurCvScreen(
                             it.copy(certifications = it.certifications.filterIndexed { j, _ -> j != i })
                         }
                     },
+                    onModifier = { i, v ->
+                        vm.majCv { it.copy(certifications = it.certifications.remplacer(i, v)) }
+                    },
                 )
             }
 
@@ -321,6 +334,9 @@ fun EditeurCvScreen(
                                 it.infosComplementaires.filterIndexed { j, _ -> j != i })
                         }
                     },
+                    onModifier = { i, v ->
+                        vm.majCv { it.copy(infosComplementaires = it.infosComplementaires.remplacer(i, v)) }
+                    },
                 )
                 Spacer(Modifier.height(8.dp))
                 ListeChaines(
@@ -331,6 +347,9 @@ fun EditeurCvScreen(
                         vm.majCv {
                             it.copy(centresInteret = it.centresInteret.filterIndexed { j, _ -> j != i })
                         }
+                    },
+                    onModifier = { i, v ->
+                        vm.majCv { it.copy(centresInteret = it.centresInteret.remplacer(i, v)) }
                     },
                 )
             }
@@ -385,6 +404,7 @@ private fun BlocExperienceCv(
             onSupprimer = { i ->
                 onChange(experience.copy(puces = experience.puces.filterIndexed { j, _ -> j != i }))
             },
+            onModifier = { i, v -> onChange(experience.copy(puces = experience.puces.remplacer(i, v))) },
         )
     }
 }

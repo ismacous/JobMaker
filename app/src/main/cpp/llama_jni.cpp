@@ -32,8 +32,9 @@
 
 namespace {
 
-// Codes de retour partages avec LlamaBridge.kt
-constexpr jint OK                 = 0;
+// Codes de retour partages avec LlamaBridge.kt. nativeBeginGenerate renvoie le
+// nombre de tokens du prompt quand tout va bien, donc seules les valeurs
+// negatives sont des erreurs.
 constexpr jint ERR_NO_SESSION     = -1;
 constexpr jint ERR_PROMPT_TOO_LONG = -2;
 constexpr jint ERR_DECODE         = -3;
@@ -50,6 +51,12 @@ struct Session {
     int n_emitted  = 0;   // tokens generes pour la requete en cours
     int max_tokens = 0;
     bool generating = false;
+
+    // Lecture du prompt, avancee morceau par morceau depuis Kotlin plutot qu'en
+    // un seul appel bloquant : c'est la phase la plus longue sur un telephone,
+    // et il faut pouvoir l'afficher et l'interrompre.
+    std::vector<llama_token> prompt;
+    size_t prompt_lu = 0;
 
     // Un token peut couper une sequence UTF-8 au milieu (accents, emoji).
     // On garde les octets incomplets ici jusqu'a pouvoir former du texte valide.
@@ -134,22 +141,8 @@ std::string piece_of(const llama_vocab* vocab, llama_token token) {
     return big;
 }
 
-// Envoie une liste de tokens au modele par lots, pour borner la memoire de
-// travail sur les prompts longs (une offre + un profil complet, ca chiffre).
-bool decode_all(Session* s, std::vector<llama_token>& tokens) {
-    constexpr int kChunk = 256;
-    const int total = static_cast<int>(tokens.size());
-    for (int i = 0; i < total; i += kChunk) {
-        const int n = std::min(kChunk, total - i);
-        llama_batch batch = llama_batch_get_one(tokens.data() + i, n);
-        if (llama_decode(s->ctx, batch) != 0) {
-            LOGE("llama_decode a echoue a l'offset %d", i);
-            return false;
-        }
-        s->n_past += n;
-    }
-    return true;
-}
+// Taille d'un lot de lecture du prompt. Doit rester <= n_batch du contexte.
+constexpr int kLotPrompt = 256;
 
 void build_sampler(Session* s, float temp, float top_p, int top_k,
                    float repeat_penalty, int repeat_last_n, uint32_t seed) {
@@ -357,13 +350,54 @@ Java_com_jobmaker_llm_LlamaBridge_nativeBeginGenerate(JNIEnv* env, jobject /*thi
     build_sampler(s, temp, top_p, top_k, repeat_penalty, repeat_last_n,
                   static_cast<uint32_t>(seed));
 
-    if (!decode_all(s, tokens)) return ERR_DECODE;
-
+    s->prompt     = std::move(tokens);
+    s->prompt_lu  = 0;
     s->n_emitted  = 0;
     s->max_tokens = max_tokens;
-    s->generating = true;
+    s->generating = false;   // vrai seulement quand le prompt est entierement lu
     s->utf8_tail.clear();
-    return OK;
+
+    // Retour positif = nombre de tokens que le prompt va demander de lire.
+    // L'interface s'en sert pour afficher un avancement : c'est la phase
+    // pendant laquelle rien ne s'ecrit et ou l'on croit l'application figee.
+    return static_cast<jint>(s->prompt.size());
+}
+
+/**
+ * Lit le lot suivant du prompt.
+ *
+ * Retourne le nombre de tokens lus (> 0), 0 quand le prompt est entierement
+ * lu et que la generation peut commencer, ou un code d'erreur negatif.
+ *
+ * Decouper permet a l'appelant d'afficher l'avancement et d'abandonner : un
+ * llama_decode sur 2000 tokens d'un coup est un appel bloquant de plusieurs
+ * dizaines de secondes qu'aucun bouton ne peut interrompre.
+ */
+JNI_FN(jint)
+Java_com_jobmaker_llm_LlamaBridge_nativeLirePromptSuivant(JNIEnv* /*env*/, jobject /*thiz*/,
+                                                          jlong handle) {
+    Session* s = as_session(handle);
+    if (s == nullptr) return ERR_NO_SESSION;
+    std::lock_guard<std::mutex> lock(s->mu);
+
+    if (s->prompt_lu >= s->prompt.size()) {
+        s->generating = true;
+        return 0;
+    }
+
+    const int reste = static_cast<int>(s->prompt.size() - s->prompt_lu);
+    const int n = std::min(kLotPrompt, reste);
+
+    llama_batch batch = llama_batch_get_one(s->prompt.data() + s->prompt_lu, n);
+    if (llama_decode(s->ctx, batch) != 0) {
+        LOGE("llama_decode a echoue apres %zu tokens de prompt", s->prompt_lu);
+        return ERR_DECODE;
+    }
+    s->prompt_lu += n;
+    s->n_past    += n;
+
+    if (s->prompt_lu >= s->prompt.size()) s->generating = true;
+    return n;
 }
 
 /**
@@ -417,6 +451,8 @@ Java_com_jobmaker_llm_LlamaBridge_nativeEndGenerate(JNIEnv* /*env*/, jobject /*t
     std::lock_guard<std::mutex> lock(s->mu);
     s->generating = false;
     s->utf8_tail.clear();
+    s->prompt.clear();
+    s->prompt_lu = 0;
     clear_kv(s);
 }
 

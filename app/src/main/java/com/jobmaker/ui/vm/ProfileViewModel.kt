@@ -106,6 +106,11 @@ class ProfileViewModel(private val container: AppContainer) : ViewModel() {
     fun supprimerCompetence(groupeId: String, index: Int) = majGroupeCompetences(groupeId) { g ->
         g.copy(items = g.items.filterIndexed { i, _ -> i != index })
     }
+    fun majNomCompetence(groupeId: String, index: Int, nom: String) =
+        majGroupeCompetences(groupeId) { g ->
+            g.copy(items = g.items.mapIndexed { i, c -> if (i == index) c.copy(nom = nom) else c })
+        }
+
     fun majNiveauCompetence(groupeId: String, index: Int, niveau: Int) =
         majGroupeCompetences(groupeId) { g ->
             g.copy(items = g.items.mapIndexed { i, c -> if (i == index) c.copy(niveau = niveau) else c })

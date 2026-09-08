@@ -122,9 +122,19 @@ class LlmRuntime(
      * l'eau, ce qui sert a la fois a l'affichage en direct et a montrer que
      * l'application n'est pas figee pendant les longues generations.
      */
+    /**
+     * Genere une reponse complete.
+     *
+     * @param onLecturePrompt appele a chaque lot de prompt lu, avec le nombre
+     *   de tokens lus, le total et la duree ecoulee. C'est la phase pendant
+     *   laquelle rien ne s'ecrit : sans cette mesure, impossible de distinguer
+     *   un moteur lent d'un pipeline bloque.
+     * @param onToken recoit les morceaux au fil de l'eau.
+     */
     suspend fun complete(
         messages: List<ChatMessage>,
         params: GenerationParams,
+        onLecturePrompt: ((lus: Int, total: Int, dureeMs: Long) -> Unit)? = null,
         onToken: ((String) -> Unit)? = null,
     ): String = mutex.withLock {
         val h = handle
@@ -134,26 +144,54 @@ class LlmRuntime(
             val prompt = renderPrompt(h, messages)
             val seed = if (params.seed >= 0) params.seed else (System.nanoTime() and 0x7FFFFFFF).toInt()
 
-            when (val rc = LlamaBridge.nativeBeginGenerate(
+            val debutLecture = System.currentTimeMillis()
+            val rc = LlamaBridge.nativeBeginGenerate(
                 h, prompt, params.maxTokens, params.temperature, params.topP,
                 params.topK, params.repeatPenalty, params.repeatLastN, seed,
-            )) {
-                LlamaBridge.OK -> Unit
-                LlamaBridge.ERR_PROMPT_TOO_LONG -> throw LlmException(
-                    "Texte trop long pour la fenetre de contexte du modele " +
-                        "(${loaded?.contextSize} tokens). Reduisez l'offre collee, " +
-                        "ou augmentez la taille de contexte dans les reglages."
-                )
-                LlamaBridge.ERR_TOKENIZE -> throw LlmException("Echec de la tokenisation du prompt.")
-                LlamaBridge.ERR_DECODE -> throw LlmException("Echec du calcul du prompt par le modele.")
-                else -> throw LlmException("Erreur du moteur d'inference (code $rc).")
+            )
+            if (rc < 0) {
+                throw when (rc) {
+                    LlamaBridge.ERR_PROMPT_TOO_LONG -> LlmException(
+                        "Texte trop long pour la fenetre de contexte du modele " +
+                            "(${loaded?.contextSize} tokens). Reduisez l'offre collee, " +
+                            "ou augmentez la taille de contexte dans les reglages."
+                    )
+                    LlamaBridge.ERR_TOKENIZE -> LlmException("Echec de la tokenisation du prompt.")
+                    LlamaBridge.ERR_DECODE -> LlmException("Echec du calcul du prompt par le modele.")
+                    LlamaBridge.ERR_NO_SESSION -> LlmException("Aucun modele charge.")
+                    else -> LlmException("Erreur du moteur d'inference (code $rc).")
+                }
             }
+            // Lecture du prompt lot par lot : l'avancement remonte a l'interface
+            // et l'annulation devient possible pendant cette phase.
+            val totalPrompt = rc
+            var lus = 0
+            onLecturePrompt?.invoke(0, totalPrompt, 0L)
+            while (true) {
+                if (!currentCoroutineContext().isActive) {
+                    LlamaBridge.nativeEndGenerate(h)
+                    return@withContext ""
+                }
+                val n = LlamaBridge.nativeLirePromptSuivant(h)
+                if (n < 0) {
+                    LlamaBridge.nativeEndGenerate(h)
+                    throw LlmException("Echec du calcul du prompt par le modele (code $n).")
+                }
+                if (n == 0) break
+                lus += n
+                onLecturePrompt?.invoke(lus, totalPrompt, System.currentTimeMillis() - debutLecture)
+            }
+            val dureeLecture = System.currentTimeMillis() - debutLecture
+            Log.i(TAG, "Prompt : $lus tokens lus en $dureeLecture ms")
 
             val sb = StringBuilder()
+            var tokens = 0
+            val debutRedaction = System.currentTimeMillis()
             try {
                 while (true) {
                     if (!currentCoroutineContext().isActive) break
                     val piece = LlamaBridge.nativeNextPiece(h) ?: break
+                    tokens++
                     if (piece.isNotEmpty()) {
                         sb.append(piece)
                         onToken?.invoke(piece)
@@ -163,6 +201,8 @@ class LlmRuntime(
             } finally {
                 LlamaBridge.nativeEndGenerate(h)
             }
+            val dureeRedaction = System.currentTimeMillis() - debutRedaction
+            Log.i(TAG, "Redaction : $tokens tokens en ${dureeRedaction} ms")
             trimStopSequences(sb.toString(), params.stopSequences)
         }
     }

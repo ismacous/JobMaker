@@ -126,6 +126,14 @@ fun SectionCarte(
  * Utilise partout ou l'utilisateur saisit des missions, des competences, des
  * centres d'interet.
  */
+/**
+ * Editeur d'une liste de chaines : un champ modifiable par element, plus un
+ * champ pour en ajouter.
+ *
+ * Les elements sont editables sur place. C'est indispensable : une faute de
+ * frappe dans une mission longuement redigee ne doit pas obliger a tout
+ * resaisir. [onModifier] peut etre omis pour les listes en lecture seule.
+ */
 @Composable
 fun ListeChaines(
     titre: String,
@@ -133,6 +141,7 @@ fun ListeChaines(
     onAjouter: (String) -> Unit,
     onSupprimer: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    onModifier: ((Int, String) -> Unit)? = null,
     aide: String? = null,
     multiligne: Boolean = false,
 ) {
@@ -147,18 +156,33 @@ fun ListeChaines(
                 modifier = Modifier.padding(bottom = 4.dp),
             )
         }
+
         valeurs.forEachIndexed { index, valeur ->
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                verticalAlignment = Alignment.Top,
+                verticalAlignment = if (onModifier == null) Alignment.Top
+                else Alignment.CenterVertically,
             ) {
-                Text("•  ", style = MaterialTheme.typography.bodyMedium)
-                Text(valeur, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                IconButton(onClick = { onSupprimer(index) }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Close, "Supprimer", Modifier.size(16.dp))
+                if (onModifier == null) {
+                    Text("•  ", style = MaterialTheme.typography.bodyMedium)
+                    Text(valeur, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    OutlinedTextField(
+                        value = valeur,
+                        onValueChange = { onModifier(index, it) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = !multiligne,
+                        minLines = if (multiligne) 2 else 1,
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        shape = MaterialTheme.shapes.small,
+                    )
+                }
+                IconButton(onClick = { onSupprimer(index) }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Close, "Supprimer", Modifier.size(18.dp))
                 }
             }
         }
+
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.Bottom) {
             OutlinedTextField(
                 value = saisie,
@@ -180,6 +204,10 @@ fun ListeChaines(
         }
     }
 }
+
+/** Remplace l'element a [index], en laissant la liste inchangee si l'index sort. */
+fun List<String>.remplacer(index: Int, valeur: String): List<String> =
+    if (index !in indices) this else mapIndexed { i, v -> if (i == index) valeur else v }
 
 @Composable
 fun Bandeau(

@@ -14,6 +14,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+/**
+ * Ou en est le modele. La distinction compte : la lecture du prompt est une
+ * phase pendant laquelle rien ne s'ecrit, et sans la nommer on croit
+ * l'application figee.
+ */
+enum class PhaseGeneration(val libelle: String) {
+    PREPARATION("Chargement du modele"),
+    LECTURE("Lecture de l'annonce et du profil"),
+    REDACTION("Redaction"),
+}
+
 data class EtatGeneration(
     val enCours: Boolean = false,
     val etapeIndex: Int = 0,
@@ -26,9 +37,33 @@ data class EtatGeneration(
     val avertissements: List<String> = emptyList(),
     val erreur: String? = null,
     val candidatureId: String? = null,
+    // --- mesures ---
+    val phase: PhaseGeneration = PhaseGeneration.PREPARATION,
+    /** Horodatage du lancement, 0 si rien n'a demarre. */
+    val debutMs: Long = 0L,
+    val promptLus: Int = 0,
+    val promptTotal: Int = 0,
+    val msLecturePrompt: Long = 0L,
+    val tokensEcrits: Int = 0,
+    val debutRedactionMs: Long = 0L,
 ) {
     val progression: Float
         get() = if (etapesTotal == 0) 0f else etapeIndex.toFloat() / etapesTotal
+
+    /** Vitesse de lecture du prompt, en tokens par seconde. */
+    val vitesseLecture: Double
+        get() = if (msLecturePrompt <= 0) 0.0 else promptLus * 1000.0 / msLecturePrompt
+
+    /** Vitesse de redaction, en tokens par seconde. */
+    fun vitesseRedaction(maintenantMs: Long): Double {
+        if (debutRedactionMs <= 0L || tokensEcrits <= 0) return 0.0
+        val ecoule = maintenantMs - debutRedactionMs
+        return if (ecoule <= 0) 0.0 else tokensEcrits * 1000.0 / ecoule
+    }
+
+    /** Avancement de la lecture du prompt, de 0 a 1. */
+    val progressionLecture: Float
+        get() = if (promptTotal <= 0) 0f else (promptLus.toFloat() / promptTotal).coerceIn(0f, 1f)
 }
 
 /** Ecran "Nouvelle candidature" : coller une offre, lancer le pipeline. */
@@ -58,7 +93,11 @@ class GenerateViewModel(private val container: AppContainer) : ViewModel() {
     fun lancer(candidatureExistante: Candidature? = null) {
         if (_etat.value.enCours) return
         travail?.cancel()
-        _etat.value = EtatGeneration(enCours = true, etapeTitre = "Preparation...")
+        _etat.value = EtatGeneration(
+            enCours = true,
+            etapeTitre = "Preparation...",
+            debutMs = System.currentTimeMillis(),
+        )
 
         travail = viewModelScope.launch {
             val profil = container.profileRepository.get()
@@ -89,15 +128,40 @@ class GenerateViewModel(private val container: AppContainer) : ViewModel() {
                 etapeTitre = evenement.titre,
                 etapeDetail = evenement.detail,
                 apercuBrut = "",
+                // Chaque etape repart de zero : les mesures de la precedente
+                // n'ont plus de sens.
+                phase = PhaseGeneration.PREPARATION,
+                promptLus = 0,
+                promptTotal = 0,
+                msLecturePrompt = 0L,
+                tokensEcrits = 0,
+                debutRedactionMs = 0L,
             )
 
             is PipelineEvent.Modele -> _etat.value = _etat.value.copy(modeleActuel = evenement.nom)
 
+            is PipelineEvent.Lecture -> _etat.value = _etat.value.copy(
+                phase = PhaseGeneration.LECTURE,
+                promptLus = evenement.lus,
+                promptTotal = evenement.total,
+                msLecturePrompt = evenement.dureeMs,
+            )
+
             is PipelineEvent.Jeton -> {
+                val actuel = _etat.value
                 // On ne garde qu'une fenetre glissante : le texte brut sert de
                 // temoin d'activite, pas de contenu a lire.
-                val nouveau = (_etat.value.apercuBrut + evenement.texte).takeLast(1200)
-                _etat.value = _etat.value.copy(apercuBrut = nouveau)
+                val nouveau = (actuel.apercuBrut + evenement.texte).takeLast(1200)
+                _etat.value = actuel.copy(
+                    apercuBrut = nouveau,
+                    phase = PhaseGeneration.REDACTION,
+                    tokensEcrits = actuel.tokensEcrits + 1,
+                    debutRedactionMs = if (actuel.debutRedactionMs == 0L) {
+                        System.currentTimeMillis()
+                    } else {
+                        actuel.debutRedactionMs
+                    },
+                )
             }
 
             is PipelineEvent.Avertissement -> _etat.value = _etat.value.copy(

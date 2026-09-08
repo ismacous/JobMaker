@@ -23,7 +23,7 @@ enum class LangueSortie(val label: String) {
 data class Settings(
     /** Modele affecte a chaque agent. Vide = premier modele installe. */
     val modeleParRole: Map<AgentRole, String> = emptyMap(),
-    val tailleContexte: Int = 8192,
+    val tailleContexte: Int = 6144,
     val threads: Int = LlmRuntime.defaultThreads(),
     val couchesGpu: Int = 0,
     val gabaritParDefaut: String = "sobre",
@@ -49,7 +49,7 @@ class SettingsRepository(private val context: Context) {
         }.toMap()
         return Settings(
             modeleParRole = roles,
-            tailleContexte = this[KEY_CONTEXTE] ?: 8192,
+            tailleContexte = this[KEY_CONTEXTE] ?: 6144,
             threads = this[KEY_THREADS] ?: LlmRuntime.defaultThreads(),
             couchesGpu = this[KEY_GPU] ?: 0,
             gabaritParDefaut = this[KEY_GABARIT] ?: "sobre",

@@ -52,6 +52,7 @@ import com.jobmaker.ui.components.Champ
 import com.jobmaker.ui.components.JaugeScore
 import com.jobmaker.ui.components.ListeChaines
 import com.jobmaker.ui.components.SectionCarte
+import com.jobmaker.ui.components.remplacer
 import com.jobmaker.ui.components.TypeBandeau
 import com.jobmaker.ui.vm.ProfileViewModel
 import kotlinx.coroutines.Dispatchers
@@ -152,9 +153,15 @@ fun ProfilScreen(
                 JaugeScore(profil.completude, "Profil rempli")
             }
             if (profil.manques.isNotEmpty()) {
+                // A 100 % le profil est utilisable : ce qui reste n'est plus un
+                // manque mais un gain possible. Dire « il reste a renseigner »
+                // au-dessus d'un « 100 / 100 » serait contradictoire.
+                val complet = profil.completude >= 100
                 Bandeau(
-                    "Il reste a renseigner :\n" + profil.manques.joinToString("\n") { "• $it" },
-                    TypeBandeau.ALERTE,
+                    (if (complet) "Profil utilisable. Pour aller plus loin :\n"
+                    else "Il reste a renseigner :\n") +
+                        profil.manques.joinToString("\n") { "• $it" },
+                    if (complet) TypeBandeau.INFO else TypeBandeau.ALERTE,
                 )
             } else {
                 Bandeau(
@@ -313,11 +320,10 @@ fun ProfilScreen(
                         }
                         ListeChaines(
                             titre = "Competences",
-                            valeurs = groupe.items.map { c ->
-                                if (c.niveau > 0) "${c.nom} (${c.niveau}/5)" else c.nom
-                            },
+                            valeurs = groupe.items.map { it.nom },
                             onAjouter = { vm.ajouterCompetence(groupe.id, it) },
                             onSupprimer = { vm.supprimerCompetence(groupe.id, it) },
+                            onModifier = { i, v -> vm.majNomCompetence(groupe.id, i, v) },
                         )
                     }
                 }
@@ -388,6 +394,7 @@ fun ProfilScreen(
                     valeurs = profil.permis,
                     onAjouter = { vm.majPermis(profil.permis + it) },
                     onSupprimer = { i -> vm.majPermis(profil.permis.filterIndexed { j, _ -> j != i }) },
+                    onModifier = { i, v -> vm.majPermis(profil.permis.remplacer(i, v)) },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
@@ -441,6 +448,11 @@ fun ProfilScreen(
                             onSupprimer = { i ->
                                 vm.majBenevolat(activite.id) {
                                     it.copy(missions = it.missions.filterIndexed { j, _ -> j != i })
+                                }
+                            },
+                            onModifier = { i, v ->
+                                vm.majBenevolat(activite.id) {
+                                    it.copy(missions = it.missions.remplacer(i, v))
                                 }
                             },
                         )
@@ -508,6 +520,7 @@ fun ProfilScreen(
                     onSupprimer = { i ->
                         vm.majCentresInteret(profil.centresInteret.filterIndexed { j, _ -> j != i })
                     },
+                    onModifier = { i, v -> vm.majCentresInteret(profil.centresInteret.remplacer(i, v)) },
                 )
             }
 
@@ -603,6 +616,7 @@ private fun BlocExperienceProfil(
             onSupprimer = { i ->
                 onChange { it.copy(missions = it.missions.filterIndexed { j, _ -> j != i }) }
             },
+            onModifier = { i, v -> onChange { it.copy(missions = it.missions.remplacer(i, v)) } },
         )
         Spacer(Modifier.height(6.dp))
         ListeChaines(
@@ -616,6 +630,7 @@ private fun BlocExperienceProfil(
             onSupprimer = { i ->
                 onChange { it.copy(realisations = it.realisations.filterIndexed { j, _ -> j != i }) }
             },
+            onModifier = { i, v -> onChange { it.copy(realisations = it.realisations.remplacer(i, v)) } },
         )
         Spacer(Modifier.height(6.dp))
         ListeChaines(
@@ -625,6 +640,7 @@ private fun BlocExperienceProfil(
             onSupprimer = { i ->
                 onChange { it.copy(outils = it.outils.filterIndexed { j, _ -> j != i }) }
             },
+            onModifier = { i, v -> onChange { it.copy(outils = it.outils.remplacer(i, v)) } },
         )
     }
 }
@@ -686,6 +702,7 @@ private fun BlocFormationProfil(
             onSupprimer = { i ->
                 onChange { it.copy(matieres = it.matieres.filterIndexed { j, _ -> j != i }) }
             },
+            onModifier = { i, v -> onChange { it.copy(matieres = it.matieres.remplacer(i, v)) } },
         )
     }
 }

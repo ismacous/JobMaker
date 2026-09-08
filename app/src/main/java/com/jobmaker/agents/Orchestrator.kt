@@ -27,6 +27,8 @@ sealed interface PipelineEvent {
     data class Etape(val index: Int, val total: Int, val titre: String, val detail: String) : PipelineEvent
     data class Modele(val nom: String) : PipelineEvent
     data class Jeton(val texte: String) : PipelineEvent
+    /** Avancement de la lecture du prompt, avant que le modele n'ecrive. */
+    data class Lecture(val lus: Int, val total: Int, val dureeMs: Long) : PipelineEvent
     data class Avertissement(val message: String) : PipelineEvent
     data class CandidaturePrete(val candidature: Candidature) : PipelineEvent
     data class ExplicationPrete(val explication: JobExplanation) : PipelineEvent
@@ -81,6 +83,7 @@ class Orchestrator(
                 user = Prompts.analysteUser(offre),
                 params = GenerationParams.precise(maxTokens = 1200),
                 suppressReasoning = analyseNoThink,
+                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
             )
             if (analyse.annonceIncomplete) {
@@ -105,6 +108,7 @@ class Orchestrator(
                 user = Prompts.strategeUser(analyse, digest.texte),
                 params = GenerationParams.precise(maxTokens = 1400),
                 suppressReasoning = strategieNoThink,
+                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
             )
             val strategie = remapperIdentifiants(strategieBrute, digest)
@@ -121,6 +125,7 @@ class Orchestrator(
                 user = Prompts.redacteurCvUser(analyse, strategie, digest.texte, langue, settings.cvUnePage),
                 params = GenerationParams.writing(maxTokens = 2200),
                 suppressReasoning = redactionNoThink,
+                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
             ).let { completerDepuisProfil(it, profile, langue) }
 
@@ -136,6 +141,7 @@ class Orchestrator(
                 ),
                 params = GenerationParams.writing(maxTokens = 1600),
                 suppressReasoning = redactionNoThink,
+                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
             ).let { completerLettre(it, profile, analyse, langue) }
 
@@ -156,7 +162,8 @@ class Orchestrator(
                     ),
                     params = GenerationParams.precise(maxTokens = 1400),
                     suppressReasoning = relectureNoThink,
-                    onToken = { trySend(PipelineEvent.Jeton(it)) },
+                    onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
+                onToken = { trySend(PipelineEvent.Jeton(it)) },
                 )
 
                 // Les controles mecaniques passent apres l'IA et la completent :
@@ -198,7 +205,8 @@ class Orchestrator(
                                 ),
                                 params = GenerationParams.writing(maxTokens = 2200),
                                 suppressReasoning = correctionNoThink,
-                                onToken = { trySend(PipelineEvent.Jeton(it)) },
+                                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
+                onToken = { trySend(PipelineEvent.Jeton(it)) },
                             )
                         }.getOrNull()
                         if (cvCorrige != null) cv = completerDepuisProfil(cvCorrige, profile, langue)
@@ -216,7 +224,8 @@ class Orchestrator(
                                     ),
                                     params = GenerationParams.writing(maxTokens = 1600),
                                     suppressReasoning = correctionNoThink,
-                                    onToken = { trySend(PipelineEvent.Jeton(it)) },
+                                    onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
+                onToken = { trySend(PipelineEvent.Jeton(it)) },
                                 )
                             }.getOrNull()
                             if (lettreCorrigee != null) {
@@ -286,6 +295,7 @@ class Orchestrator(
                 user = Prompts.explicateurUser(offre, digest.texte),
                 params = GenerationParams.explaining(maxTokens = 2400),
                 suppressReasoning = noThink,
+                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
             )
             send(PipelineEvent.ExplicationPrete(explication))
