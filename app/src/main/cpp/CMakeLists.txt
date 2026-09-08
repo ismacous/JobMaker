@@ -5,6 +5,40 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# ---------------------------------------------------------------------------
+# Optimisation du code natif, y compris en variante debug de l'application.
+#
+# L'APK distribue est un build debug (assembleDebug) : plus gros, mais sans
+# minification R8, donc sans risque qu'une classe atteinte par reflexion soit
+# supprimee par erreur. Le probleme est que Gradle demande alors a CMake
+# CMAKE_BUILD_TYPE=Debug, et la chaine du NDK compile TOUT le code natif en
+# -O0. Sur ggml, cela divise la vitesse d'inference par plusieurs dizaines :
+# les noyaux SIMD sont bien la, mais sans inlining, sans vectorisation des
+# boucles qui les entourent et sans allocation de registres correcte.
+#
+# Mesure sur un Snapdragon 8 Elite avec Qwen3 4B Q4 avant correction :
+# 0,9 token/s en lecture de prompt et 0,45 token/s en redaction, soit environ
+# cinquante fois moins que ce que la machine sait faire.
+#
+# On remplace donc les jeux de drapeaux par configuration. Ils doivent etre
+# fixes AVANT que llama.cpp ne soit ajoute, pour que ses cibles les recoivent.
+# A noter : -O3 dans cppFlags cote Gradle ne suffisait pas, car il alimente
+# CMAKE_CXX_FLAGS, place avant CMAKE_CXX_FLAGS_DEBUG sur la ligne de commande,
+# donc ecrase par le -O0 qui suit. Et le coeur de ggml est en C, pas en C++.
+# ---------------------------------------------------------------------------
+if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+foreach(conf DEBUG RELWITHDEBINFO MINSIZEREL)
+    set(CMAKE_C_FLAGS_${conf}   "-O3 -DNDEBUG")
+    set(CMAKE_CXX_FLAGS_${conf} "-O3 -DNDEBUG")
+endforeach()
+set(CMAKE_C_FLAGS_RELEASE   "-O3 -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+
+message(STATUS "JobMaker : build natif ${CMAKE_BUILD_TYPE}, C=${CMAKE_C_FLAGS_${CMAKE_BUILD_TYPE}}")
+
 if (POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
@@ -90,5 +124,7 @@ target_link_libraries(jobmaker_llm
         log
 )
 
-# -O3 + LTO leger : la generation de tokens est purement CPU-bound.
-target_compile_options(jobmaker_llm PRIVATE -O3 -fvisibility=hidden)
+# L'optimisation est fixee plus haut, pour toutes les cibles y compris ggml.
+# Ici, seule la visibilite nous concerne : les symboles JNI sont exportes
+# explicitement par JNIEXPORT.
+target_compile_options(jobmaker_llm PRIVATE -fvisibility=hidden)

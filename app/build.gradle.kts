@@ -38,7 +38,9 @@ android {
         if (!skipNative) {
             externalNativeBuild {
                 cmake {
-                    cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti", "-O3")
+                    // Le niveau d'optimisation est fixe dans CMakeLists.txt :
+                    // un -O3 place ici serait ecrase par le -O0 du mode Debug.
+                    cppFlags += listOf("-std=c++17", "-fexceptions", "-frtti")
                     arguments += listOf(
                         "-DJOBMAKER_LLAMA_TAG=$llamaTag",
                         "-DJOBMAKER_ARM_ARCH=$armArch",
