@@ -111,6 +111,8 @@ class LlmRuntime(
      */
     data class Mesure(
         val nThreads: Int,
+        /** Taille des lots de lecture du prompt. */
+        val nLot: Int,
         val msLecture: Long,
         val msEcriture: Long,
         val tokensLus: Int,
@@ -132,20 +134,27 @@ class LlmRuntime(
     }
 
     /**
-     * Mesure la lecture d'un prompt de [nPrompt] tokens puis l'ecriture de
-     * [nGen] tokens, avec [nThreads] threads. Le modele doit deja etre charge.
+     * Mesure la lecture d'un prompt de [nPrompt] tokens, par lots de [nLot],
+     * puis l'ecriture de [nGen] tokens, avec [nThreads] threads. Le modele
+     * doit deja etre charge.
      */
-    suspend fun mesurer(nPrompt: Int, nGen: Int, nThreads: Int): Mesure = mutex.withLock {
+    suspend fun mesurer(
+        nPrompt: Int,
+        nGen: Int,
+        nThreads: Int,
+        nLot: Int = nPrompt,
+    ): Mesure = mutex.withLock {
         val h = handle
         if (h == 0L) throw LlmException("Aucun modele charge.")
         withContext(dispatcher) {
             LlamaBridge.nativeSetThreads(h, nThreads)
             val avant = CompteursSysteme.lire()
-            val r = LlamaBridge.nativeBench(h, nPrompt, nGen)
+            val r = LlamaBridge.nativeBench(h, nPrompt, nGen, nLot)
             val apres = CompteursSysteme.lire()
             if (r.size < 4) throw LlmException("La mesure a echoue (decode impossible).")
             Mesure(
                 nThreads = nThreads,
+                nLot = nLot,
                 msLecture = r[0],
                 msEcriture = r[1],
                 tokensLus = r[2].toInt(),

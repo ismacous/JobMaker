@@ -36,6 +36,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -45,6 +46,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jobmaker.llm.CompteursSysteme
 import com.jobmaker.ui.components.Bandeau
 import com.jobmaker.ui.components.TexteDefilant
 import com.jobmaker.ui.components.TypeBandeau
@@ -243,10 +245,26 @@ private fun ProgressionGeneration(vm: GenerateViewModel) {
     // Horloge qui avance : sans elle, impossible de savoir si le modele
     // travaille ou si l'application est bloquee.
     var maintenant by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    // Nombre de coeurs reellement occupes, releve en direct. Le banc d'essai
+    // donne cette valeur sur un prompt fabrique ; ici elle repond sur la vraie
+    // generation, la seule qui rame. Proche du nombre de threads : le
+    // telephone calcule. Proche de zero : il attend.
+    var coeursOccupes by remember { mutableDoubleStateOf(0.0) }
     LaunchedEffect(etat.enCours) {
+        var precedent = CompteursSysteme.lire()
+        var precedentMs = System.currentTimeMillis()
         while (etat.enCours) {
-            maintenant = System.currentTimeMillis()
             delay(500)
+            val maintenantMs = System.currentTimeMillis()
+            val actuel = CompteursSysteme.lire()
+            val ecouleMs = maintenantMs - precedentMs
+            if (ecouleMs > 0) {
+                coeursOccupes = (actuel - precedent).msProcesseur.toDouble() / ecouleMs
+            }
+            precedent = actuel
+            precedentMs = maintenantMs
+            maintenant = maintenantMs
         }
     }
 
@@ -277,12 +295,19 @@ private fun ProgressionGeneration(vm: GenerateViewModel) {
                     )
                 }
             }
-            Text(
-                dureeCourte(ecoule),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    dureeCourte(ecoule),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "%.1f coeurs".format(coeursOccupes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         LinearProgressIndicator(

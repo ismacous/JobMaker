@@ -487,15 +487,21 @@ Java_com_jobmaker_llm_LlamaBridge_nativeSetThreads(JNIEnv* /*env*/, jobject /*th
 }
 
 /**
- * Lit un prompt synthetique de n_prompt tokens puis ecrit n_gen tokens.
+ * Lit un prompt synthetique de n_prompt tokens par lots de n_lot, puis ecrit
+ * n_gen tokens.
  *
  * Retourne {ms de lecture, ms d'ecriture, tokens lus, tokens ecrits}, ou un
  * tableau vide en cas d'echec. N'utilise pas l'etat de generation courant :
  * le cache KV est vide avant et apres.
+ *
+ * La longueur du prompt compte autant que le reste : elle fixe la taille du
+ * cache KV, donc le cout de l'attention, pour la lecture comme pour les
+ * tokens ecrits ensuite.
  */
 JNI_FN(jlongArray)
 Java_com_jobmaker_llm_LlamaBridge_nativeBench(JNIEnv* env, jobject /*thiz*/,
-                                              jlong handle, jint n_prompt, jint n_gen) {
+                                              jlong handle, jint n_prompt, jint n_gen,
+                                              jint n_lot) {
     Session* s = as_session(handle);
     if (s == nullptr) return env->NewLongArray(0);
     std::lock_guard<std::mutex> lock(s->mu);
@@ -515,10 +521,15 @@ Java_com_jobmaker_llm_LlamaBridge_nativeBench(JNIEnv* env, jobject /*thiz*/,
 
     jlong out[4] = {0, 0, 0, 0};
 
+    // Taille de lot imposee par l'appelant : c'est le point que le banc doit
+    // pouvoir faire varier, la generation reelle lisant par lots de kLotPrompt
+    // quand le banc n'en faisait qu'un seul.
+    const int lot = std::max(1, std::min<int>(n_lot > 0 ? n_lot : kLotPrompt, kLotPrompt));
+
     const int64_t t0 = llama_time_us();
     int lus = 0;
     while (lus < voulu) {
-        const int n = std::min(kLotPrompt, voulu - lus);
+        const int n = std::min(lot, voulu - lus);
         llama_batch batch = llama_batch_get_one(tokens.data() + lus, n);
         if (llama_decode(s->ctx, batch) != 0) { clear_kv(s); return env->NewLongArray(0); }
         lus += n;

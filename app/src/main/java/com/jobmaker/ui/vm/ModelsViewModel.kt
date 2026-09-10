@@ -167,6 +167,11 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
             m.lectureParSeconde, m.ecritureParSeconde,
         )
 
+    private fun ligneLongueur(m: com.jobmaker.llm.LlmRuntime.Mesure): String =
+        "%5d tokens (lots de %3d) : lecture %6.1f tok/s | ecriture %5.2f tok/s".format(
+            m.tokensLus, m.nLot, m.lectureParSeconde, m.ecritureParSeconde,
+        )
+
     private fun ligneCompteurs(m: com.jobmaker.llm.LlmRuntime.Mesure): String =
         "   coeurs occupes %.2f | defauts majeurs %d | lu sur stockage %s".format(
             m.coeursOccupes,
@@ -233,6 +238,34 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
 
+                // Le banc precedent lisait 32 tokens d'un seul lot et trouvait
+                // le moteur rapide, alors qu'une vraie generation en lit un
+                // millier par lots de 256 et rampe. L'ecart tient forcement a
+                // l'une de ces deux differences : ce balayage les separe.
+                val longueurs = listOf(
+                    32 to 32,
+                    128 to 128,
+                    256 to 256,
+                    512 to 256,
+                    1024 to 256,
+                    1024 to 64,
+                    2048 to 256,
+                ).filter { (n, _) -> n + tokensEcrits + 8 <= info.contextSize }
+                // Du plus court au plus long, avec un budget : si l'effondrement
+                // est bien la, les passages longs prendraient vingt minutes et
+                // le banc deviendrait inutilisable.
+                val parLongueur = mutableListOf<com.jobmaker.llm.LlmRuntime.Mesure>()
+                var budgetMs = 120_000L
+                var abandonne = false
+                for ((n, lot) in longueurs) {
+                    if (budgetMs <= 0) { abandonne = true; break }
+                    val m = container.llmRuntime.mesurer(
+                        nPrompt = n, nGen = tokensEcrits, nThreads = r.threads, nLot = lot,
+                    )
+                    parLongueur += m
+                    budgetMs -= m.msLecture + m.msEcriture
+                }
+
                 buildString {
                     appendLine("MODELE")
                     appendLine(info.description)
@@ -258,6 +291,13 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
                         appendLine(ligneCompteurs(m))
                     }
                     appendLine()
+                    appendLine("LONGUEUR DU PROMPT (a ${r.threads} threads)")
+                    appendLine("Une vraie generation lit environ 1400 tokens par lots de 256.")
+                    parLongueur.forEach { appendLine(ligneLongueur(it)) }
+                    if (abandonne) {
+                        appendLine("(arrete ici : deux minutes de mesure deja depensees)")
+                    }
+                    appendLine()
                     appendLine("LECTURE DU RESULTAT")
                     val meilleure = mesures.maxByOrNull { it.ecritureParSeconde }
                     if (meilleure != null) {
@@ -273,6 +313,17 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
                                     "calcul, pas d'une attente."
                         )
                         appendLine("Meilleur reglage mesure : ${meilleure.nThreads} threads.")
+                    }
+                    val court = parLongueur.firstOrNull()
+                    val long = parLongueur.lastOrNull()
+                    if (court != null && long != null && court !== long &&
+                        long.ecritureParSeconde > 0.0
+                    ) {
+                        val chute = court.ecritureParSeconde / long.ecritureParSeconde
+                        appendLine(
+                            "Passer de %d a %d tokens de contexte divise l'ecriture par %.1f."
+                                .format(court.tokensLus, long.tokensLus, chute)
+                        )
                     }
                     appendLine()
                     appendLine("MOTEUR")

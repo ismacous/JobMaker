@@ -83,13 +83,13 @@ internal object LlamaBridge {
     external fun nativeSetThreads(handle: Long, nThreads: Int)
 
     /**
-     * Lit un prompt synthetique puis ecrit des tokens, en chronometrant les
-     * deux phases separement.
+     * Lit un prompt synthetique par lots de [nLot], puis ecrit des tokens, en
+     * chronometrant les deux phases separement.
      *
      * @return {ms de lecture, ms d'ecriture, tokens lus, tokens ecrits}, ou un
      *   tableau vide en cas d'echec.
      */
-    external fun nativeBench(handle: Long, nPrompt: Int, nGen: Int): LongArray
+    external fun nativeBench(handle: Long, nPrompt: Int, nGen: Int, nLot: Int): LongArray
 
     external fun nativeSystemInfo(): String?
 }
