@@ -10,6 +10,7 @@ import com.jobmaker.data.repo.ProfileRepository
 import com.jobmaker.llm.LlmRuntime
 import com.jobmaker.llm.ModelManager
 import com.jobmaker.render.DocumentExporter
+import com.jobmaker.work.MoteurCandidature
 
 /**
  * Localisateur de services.
@@ -33,4 +34,17 @@ class AppContainer(context: Context) {
     val llmRuntime = LlmRuntime()
     val orchestrator = Orchestrator(llmRuntime, modelManager)
     val documentExporter = DocumentExporter(appContext)
+
+    /**
+     * Detient la generation en cours. Volontairement dans le conteneur et non
+     * dans un ViewModel : le travail doit survivre a la fermeture de l'ecran.
+     */
+    val moteurCandidature = MoteurCandidature(
+        appContext = appContext,
+        orchestrator = orchestrator,
+        llmRuntime = llmRuntime,
+        profileRepository = profileRepository,
+        candidatureRepository = candidatureRepository,
+        settingsRepository = settingsRepository,
+    )
 }

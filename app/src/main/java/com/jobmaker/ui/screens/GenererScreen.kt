@@ -1,5 +1,9 @@
 package com.jobmaker.ui.screens
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,7 +49,7 @@ import com.jobmaker.ui.components.Bandeau
 import com.jobmaker.ui.components.TexteDefilant
 import com.jobmaker.ui.components.TypeBandeau
 import com.jobmaker.ui.vm.GenerateViewModel
-import com.jobmaker.ui.vm.PhaseGeneration
+import com.jobmaker.work.PhaseGeneration
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,6 +62,17 @@ fun GenererScreen(
     onOuvrirReglages: () -> Unit,
 ) {
     val offre by vm.offre.collectAsState()
+
+    // Android 13 et au-dela : sans cette permission, la notification
+    // d'avancement n'apparait pas. La generation, elle, tourne quand meme.
+    val demandeNotifs = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    val demanderNotifications: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            demandeNotifs.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val etat by vm.etat.collectAsState()
     val profil by vm.profile.collectAsState()
     val modeles by vm.modelesInstalles.collectAsState()
@@ -162,7 +177,13 @@ fun GenererScreen(
             // --- lancement ---
             if (!etat.enCours) {
                 Button(
-                    onClick = { vm.lancer() },
+                    onClick = {
+                        // La generation tourne desormais dans un service : elle
+                        // continue meme si l'on quitte l'application. La
+                        // permission ne sert qu'a en afficher l'avancement.
+                        demanderNotifications()
+                        vm.lancer()
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = offre.isNotBlank() && modeles.isNotEmpty(),
                 ) {
@@ -171,7 +192,8 @@ fun GenererScreen(
                 }
                 Text(
                     "Tout se passe sur le telephone : comptez 2 a 10 minutes selon le modele " +
-                        "choisi. Vous pouvez laisser l'ecran allume et attendre.",
+                        "choisi. Vous pouvez quitter l'application, la generation continue et " +
+                        "vous previent quand c'est pret.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
@@ -228,8 +250,9 @@ private fun ProgressionGeneration(vm: GenerateViewModel) {
         }
     }
 
-    // L'ecran reste allume pendant la generation : l'ecran eteint fait
-    // ralentir puis suspendre le calcul par Android.
+    // L'ecran reste allume tant qu'on regarde la generation. Ce n'est plus
+    // indispensable -- le service de premier plan empeche la mise en veille du
+    // calcul -- mais cela evite d'avoir a deverrouiller pour suivre l'avancee.
     val vue = LocalView.current
     DisposableEffect(etat.enCours) {
         vue.keepScreenOn = etat.enCours
