@@ -35,6 +35,14 @@ class ServiceGeneration : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var suivi: Job? = null
 
+    /**
+     * Android tue l'application si un service demarre par
+     * startForegroundService n'appelle pas startForeground. Il faut donc le
+     * faire meme sur le chemin d'arret, si l'ordre des intents fait qu'on
+     * n'est jamais passe au premier plan.
+     */
+    private var auPremierPlan = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -44,6 +52,7 @@ class ServiceGeneration : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_ARRET) {
+            if (!auPremierPlan) demarrerAuPremierPlan(notification(EtatGeneration()))
             arreterProprement()
             return START_NOT_STICKY
         }
@@ -78,6 +87,7 @@ class ServiceGeneration : Service() {
     private fun arreterProprement() {
         suivi?.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)
+        auPremierPlan = false
         stopSelf()
     }
 
@@ -87,6 +97,7 @@ class ServiceGeneration : Service() {
         } else {
             startForeground(ID_NOTIF, notif)
         }
+        auPremierPlan = true
     }
 
     private fun notification(etat: EtatGeneration): android.app.Notification {
