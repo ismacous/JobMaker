@@ -62,6 +62,13 @@ struct Session {
     // On garde les octets incomplets ici jusqu'a pouvoir former du texte valide.
     std::string utf8_tail;
 
+    // Tampon des candidats d'echantillonnage, alloue une seule fois.
+    // llama_sampler_sample() en alloue un neuf a chaque token : sur un vocabulaire
+    // de 150 000 entrees cela fait 1,8 Mo demandes puis rendus au systeme a chaque
+    // mot ecrit, ce que l'allocateur d'Android sert par mmap/munmap. On garde donc
+    // le notre et on appelle apply/accept nous-memes.
+    std::vector<llama_token_data> candidats;
+
     std::mutex mu;
 };
 
@@ -170,6 +177,38 @@ void build_sampler(Session* s, float temp, float top_p, int top_k,
     if (top_p < 1.0f) llama_sampler_chain_add(s->sampler, llama_sampler_init_top_p(top_p, 1));
     llama_sampler_chain_add(s->sampler, llama_sampler_init_temp(temp));
     llama_sampler_chain_add(s->sampler, llama_sampler_init_dist(seed));
+}
+
+/**
+ * Tire le token suivant a partir des logits du dernier decode, en reutilisant
+ * le tampon de candidats de la session. Equivalent a llama_sampler_sample,
+ * sans l'allocation d'un vecteur de la taille du vocabulaire a chaque appel.
+ */
+llama_token echantillonner(Session* s) {
+    const float* logits = llama_get_logits_ith(s->ctx, -1);
+    if (logits == nullptr) return -1;
+
+    const int n_vocab = llama_vocab_n_tokens(s->vocab);
+    if (n_vocab <= 0) return -1;
+
+    s->candidats.resize(static_cast<size_t>(n_vocab));
+    for (int i = 0; i < n_vocab; ++i) {
+        s->candidats[i] = llama_token_data{i, logits[i], 0.0f};
+    }
+
+    llama_token_data_array arr = {
+        /*.data     =*/ s->candidats.data(),
+        /*.size     =*/ s->candidats.size(),
+        /*.selected =*/ -1,
+        /*.sorted   =*/ false,
+    };
+
+    llama_sampler_apply(s->sampler, &arr);
+    if (arr.selected < 0 || static_cast<size_t>(arr.selected) >= arr.size) return -1;
+
+    const llama_token tok = arr.data[arr.selected].id;
+    llama_sampler_accept(s->sampler, tok);
+    return tok;
 }
 
 void clear_kv(Session* s) {
@@ -426,9 +465,11 @@ Java_com_jobmaker_llm_LlamaBridge_nativeNextPiece(JNIEnv* env, jobject /*thiz*/,
         return nullptr;
     }
 
-    // llama_sampler_sample enregistre deja le token dans la chaine
-    // d'echantillonnage (penalites incluses) : ne pas rappeler accept.
-    const llama_token tok = llama_sampler_sample(s->sampler, s->ctx, -1);
+    const llama_token tok = echantillonner(s);
+    if (tok < 0) {
+        s->generating = false;
+        return nullptr;
+    }
 
     if (llama_vocab_is_eog(s->vocab, tok)) {
         s->generating = false;
@@ -538,7 +579,8 @@ Java_com_jobmaker_llm_LlamaBridge_nativeBench(JNIEnv* env, jobject /*thiz*/,
 
     int ecrits = 0;
     while (ecrits < n_gen) {
-        llama_token tok = llama_sampler_sample(s->sampler, s->ctx, -1);
+        llama_token tok = echantillonner(s);
+        if (tok < 0) break;
         llama_batch batch = llama_batch_get_one(&tok, 1);
         if (llama_decode(s->ctx, batch) != 0) break;
         ++ecrits;

@@ -63,12 +63,24 @@ class ServiceGeneration : Service() {
         val moteur = (application as JobMakerApp).container.moteurCandidature
         suivi?.cancel()
         suivi = scope.launch {
+            var derniereMaj = 0L
             moteur.etat.collectLatest { etat ->
                 if (!etat.enCours) {
                     annoncerLaFin(etat)
                     arreterProprement()
                     return@collectLatest
                 }
+                // L'etat change a chaque remontee de texte. Redessiner la
+                // notification a ce rythme envoie une transaction au serveur
+                // systeme plusieurs fois par seconde, sur le fil principal --
+                // et Android en jette la plupart au-dela de cinq par seconde.
+                // Le travail est paye sans que rien ne s'affiche, pendant que
+                // les threads de calcul, qui se synchronisent a chaque couche
+                // du modele, paient chaque preemption. Une mise a jour par
+                // seconde suffit largement a une barre d'avancement.
+                val maintenant = System.currentTimeMillis()
+                if (maintenant - derniereMaj < MS_ENTRE_NOTIFICATIONS) return@collectLatest
+                derniereMaj = maintenant
                 val manager = getSystemService(NotificationManager::class.java)
                 manager?.notify(ID_NOTIF, notification(etat))
             }
@@ -192,6 +204,9 @@ class ServiceGeneration : Service() {
         private const val ID_NOTIF = 1001
         private const val ID_NOTIF_FIN = 1002
         private const val ACTION_ARRET = "com.jobmaker.ARRET_GENERATION"
+
+        /** Intervalle minimal entre deux redessins de la notification. */
+        private const val MS_ENTRE_NOTIFICATIONS = 1000L
 
         fun demarrer(context: Context) {
             val intent = Intent(context, ServiceGeneration::class.java)

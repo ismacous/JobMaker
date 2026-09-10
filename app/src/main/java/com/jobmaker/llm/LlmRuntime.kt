@@ -24,6 +24,54 @@ data class LoadedModelInfo(
     val enMemoire: Boolean = false,
 )
 
+/** Pourquoi la generation s'est arretee. */
+enum class RaisonArret(val libelle: String) {
+    /** Le modele a emis son jeton de fin : cas normal. */
+    FIN_DE_REPONSE("reponse terminee par le modele"),
+    /** L'objet JSON attendu s'est referme : on a coupe la suite. */
+    JSON_COMPLET("JSON referme, suite coupee"),
+    /** Une sequence de fin de tour a ete ecrite en clair. */
+    SEQUENCE_ARRET("marqueur de fin rencontre"),
+    /** Budget de tokens epuise : la reponse est probablement tronquee. */
+    BUDGET_EPUISE("budget de tokens epuise (reponse tronquee)"),
+    /** Fenetre de contexte pleine. */
+    CONTEXTE_PLEIN("fenetre de contexte pleine"),
+    /** Generation interrompue par l'utilisateur. */
+    ANNULE("interrompu"),
+}
+
+/**
+ * Ce qu'a reellement coute un appel au modele.
+ *
+ * On ne diagnostique pas une lenteur en la devinant : chaque etape rend ses
+ * deux phases chronometrees separement, avec la raison exacte de l'arret. Un
+ * budget epuise a repetition ne se corrige pas comme un moteur lent.
+ */
+data class TraceAppel(
+    val etape: String,
+    val tokensPrompt: Int,
+    val msPrompt: Long,
+    val tokensEcrits: Int,
+    val msEcriture: Long,
+    val maxTokens: Int,
+    val raison: RaisonArret,
+) {
+    val lectureParSeconde: Double
+        get() = tokensPrompt * 1000.0 / msPrompt.coerceAtLeast(1)
+    val ecritureParSeconde: Double
+        get() = tokensEcrits * 1000.0 / msEcriture.coerceAtLeast(1)
+    val totalMs: Long get() = msPrompt + msEcriture
+
+    fun ligne(): String = ("%-22s lecture %5d tok en %6s (%5.1f tok/s) | " +
+        "ecriture %5d/%d tok en %6s (%5.1f tok/s) | %s").format(
+        etape.take(22), tokensPrompt, duree(msPrompt), lectureParSeconde,
+        tokensEcrits, maxTokens, duree(msEcriture), ecritureParSeconde, raison.libelle,
+    )
+
+    private fun duree(ms: Long): String =
+        if (ms < 10_000) "${ms} ms" else "%.1f s".format(ms / 1000.0)
+}
+
 /**
  * Detient l'unique contexte llama.cpp vivant du processus.
  *
@@ -185,11 +233,39 @@ class LlmRuntime(
     /** Estimation grossiere utilisee quand aucun modele n'est charge. */
     fun estimateTokens(text: String): Int = (text.length / 3.2).toInt() + 1
 
+    /** Nombre de tokens que [messages] occupera une fois le gabarit applique. */
+    suspend fun compterPrompt(messages: List<ChatMessage>): Int = mutex.withLock {
+        val h = handle
+        if (h == 0L) return@withLock estimateTokens(messages.joinToString("\n") { it.content })
+        withContext(dispatcher) {
+            max(0, LlamaBridge.nativeTokenCount(h, renderPrompt(h, messages)))
+        }
+    }
+
     /**
-     * Genere une reponse complete. [onToken] recoit les morceaux au fil de
-     * l'eau, ce qui sert a la fois a l'affichage en direct et a montrer que
-     * l'application n'est pas figee pendant les longues generations.
+     * Ramene le budget d'ecriture a ce que la fenetre de contexte laisse
+     * reellement libre une fois le prompt lu.
+     *
+     * Le moteur refuse de demarrer si prompt + budget depasse le contexte : ce
+     * n'est pas une limite souple. Un budget genereux "au cas ou" ne coute donc
+     * pas seulement du temps quand le modele s'en sert, il vole de la place au
+     * prompt et fait echouer l'etape avant meme le premier token.
+     *
+     * @return les parametres ajustes, ou null si la place restante est trop
+     *   faible pour esperer une reponse complete.
      */
+    suspend fun ajusterBudget(
+        messages: List<ChatMessage>,
+        params: GenerationParams,
+        minimum: Int = 320,
+    ): Pair<GenerationParams, Int>? {
+        val contexte = loaded?.contextSize ?: return params to 0
+        val tokensPrompt = compterPrompt(messages)
+        val libre = contexte - tokensPrompt - MARGE_CONTEXTE
+        if (libre < minimum) return null
+        return params.copy(maxTokens = min(params.maxTokens, libre)) to tokensPrompt
+    }
+
     /**
      * Genere une reponse complete.
      *
@@ -197,13 +273,17 @@ class LlmRuntime(
      *   de tokens lus, le total et la duree ecoulee. C'est la phase pendant
      *   laquelle rien ne s'ecrit : sans cette mesure, impossible de distinguer
      *   un moteur lent d'un pipeline bloque.
-     * @param onToken recoit les morceaux au fil de l'eau.
+     * @param onToken recoit le texte produit et le nombre de tokens qu'il a
+     *   demande. Les appels sont regroupes : voir [MS_ENTRE_ENVOIS].
+     * @param onTrace recoit le bilan chiffre de l'appel.
      */
     suspend fun complete(
         messages: List<ChatMessage>,
         params: GenerationParams,
+        etape: String = "",
         onLecturePrompt: ((lus: Int, total: Int, dureeMs: Long) -> Unit)? = null,
-        onToken: ((String) -> Unit)? = null,
+        onToken: ((texte: String, tokens: Int) -> Unit)? = null,
+        onTrace: ((TraceAppel) -> Unit)? = null,
     ): String = mutex.withLock {
         val h = handle
         if (h == 0L) throw LlmException("Aucun modele charge.")
@@ -250,27 +330,77 @@ class LlmRuntime(
                 onLecturePrompt?.invoke(lus, totalPrompt, System.currentTimeMillis() - debutLecture)
             }
             val dureeLecture = System.currentTimeMillis() - debutLecture
-            Log.i(TAG, "Prompt : $lus tokens lus en $dureeLecture ms")
 
             val sb = StringBuilder()
+            val detecteur = if (params.arretJsonComplet) DetecteurJsonComplet() else null
             var tokens = 0
+            var raison = RaisonArret.FIN_DE_REPONSE
+
+            // Les morceaux ne sont pas renvoyes un par un a l'interface. Chaque
+            // envoi declenche une mise a jour d'etat, une recomposition et une
+            // notification systeme ; a dix tokens par seconde cela occupe le fil
+            // principal en permanence, et les threads de calcul, qui s'attendent
+            // les uns les autres a chaque couche, paient chaque preemption.
+            val enAttente = StringBuilder()
+            var tokensEnAttente = 0
+            var dernierEnvoi = System.currentTimeMillis()
+
             val debutRedaction = System.currentTimeMillis()
             try {
                 while (true) {
-                    if (!currentCoroutineContext().isActive) break
-                    val piece = LlamaBridge.nativeNextPiece(h) ?: break
+                    if (!currentCoroutineContext().isActive) {
+                        raison = RaisonArret.ANNULE
+                        break
+                    }
+                    val piece = LlamaBridge.nativeNextPiece(h)
+                    if (piece == null) {
+                        raison = when {
+                            tokens >= params.maxTokens -> RaisonArret.BUDGET_EPUISE
+                            totalPrompt + tokens + 8 >= (loaded?.contextSize ?: Int.MAX_VALUE) ->
+                                RaisonArret.CONTEXTE_PLEIN
+                            else -> RaisonArret.FIN_DE_REPONSE
+                        }
+                        break
+                    }
                     tokens++
                     if (piece.isNotEmpty()) {
                         sb.append(piece)
-                        onToken?.invoke(piece)
-                        if (hitStopSequence(sb, params.stopSequences)) break
+                        enAttente.append(piece)
+                        tokensEnAttente++
+                        val maintenant = System.currentTimeMillis()
+                        if (maintenant - dernierEnvoi >= MS_ENTRE_ENVOIS) {
+                            onToken?.invoke(enAttente.toString(), tokensEnAttente)
+                            enAttente.setLength(0)
+                            tokensEnAttente = 0
+                            dernierEnvoi = maintenant
+                        }
+                        if (hitStopSequence(sb, params.stopSequences)) {
+                            raison = RaisonArret.SEQUENCE_ARRET
+                            break
+                        }
+                        if (detecteur != null && detecteur.avaler(piece)) {
+                            raison = RaisonArret.JSON_COMPLET
+                            break
+                        }
                     }
                 }
             } finally {
                 LlamaBridge.nativeEndGenerate(h)
             }
+            if (tokensEnAttente > 0) onToken?.invoke(enAttente.toString(), tokensEnAttente)
+
             val dureeRedaction = System.currentTimeMillis() - debutRedaction
-            Log.i(TAG, "Redaction : $tokens tokens en ${dureeRedaction} ms")
+            val trace = TraceAppel(
+                etape = etape,
+                tokensPrompt = totalPrompt,
+                msPrompt = dureeLecture,
+                tokensEcrits = tokens,
+                msEcriture = dureeRedaction,
+                maxTokens = params.maxTokens,
+                raison = raison,
+            )
+            Log.i(TAG, trace.ligne())
+            onTrace?.invoke(trace)
             trimStopSequences(sb.toString(), params.stopSequences)
         }
     }
@@ -319,6 +449,19 @@ class LlmRuntime(
 
     companion object {
         private const val TAG = "LlmRuntime"
+
+        /**
+         * Place laissee libre dans la fenetre de contexte, au-dela du prompt et
+         * du budget d'ecriture. Le moteur en reclame quelques-uns ; le reste
+         * absorbe l'ecart entre le prompt compte ici et celui reellement rendu.
+         */
+        const val MARGE_CONTEXTE = 48
+
+        /**
+         * Intervalle minimal entre deux remontees de texte a l'interface.
+         * Huit rafraichissements par seconde suffisent a voir que ca ecrit.
+         */
+        private const val MS_ENTRE_ENVOIS = 120L
 
         /**
          * Sur les SoC recents (8 Elite : 2 Oryon prime + 6 performance), aller

@@ -137,7 +137,7 @@ class MoteurCandidature(
                 _etat.value = actuel.copy(
                     apercuBrut = nouveau,
                     phase = PhaseGeneration.REDACTION,
-                    tokensEcrits = actuel.tokensEcrits + 1,
+                    tokensEcrits = actuel.tokensEcrits + evenement.tokens,
                     debutRedactionMs = if (actuel.debutRedactionMs == 0L) {
                         System.currentTimeMillis()
                     } else {
@@ -146,6 +146,10 @@ class MoteurCandidature(
                 )
             }
 
+            is PipelineEvent.Mesure -> _etat.value = _etat.value.copy(
+                traces = _etat.value.traces + evenement.trace,
+            )
+
             is PipelineEvent.Avertissement -> _etat.value = _etat.value.copy(
                 avertissements = _etat.value.avertissements + evenement.message,
             )
@@ -153,23 +157,34 @@ class MoteurCandidature(
             is PipelineEvent.CandidaturePrete -> {
                 candidatureRepository.save(evenement.candidature)
                 llmRuntime.unload()
-                _etat.value = _etat.value.copy(
+                val actuel = _etat.value
+                _etat.value = actuel.copy(
                     enCours = false,
-                    etapeIndex = _etat.value.etapesTotal,
+                    etapeIndex = actuel.etapesTotal,
                     etapeTitre = "Termine",
                     etapeDetail = "",
                     candidatureId = evenement.candidature.id,
+                    dureeTotaleMs = dureeDepuisLeDebut(actuel),
                 )
+                Log.i(TAG, "\n" + _etat.value.rapport())
             }
 
             is PipelineEvent.Echec -> {
                 llmRuntime.unload()
-                _etat.value = _etat.value.copy(enCours = false, erreur = evenement.message)
+                val actuel = _etat.value
+                _etat.value = actuel.copy(
+                    enCours = false,
+                    erreur = evenement.message,
+                    dureeTotaleMs = dureeDepuisLeDebut(actuel),
+                )
             }
 
             is PipelineEvent.ExplicationPrete -> Unit
         }
     }
+
+    private fun dureeDepuisLeDebut(etat: EtatGeneration): Long =
+        if (etat.debutMs == 0L) 0L else System.currentTimeMillis() - etat.debutMs
 
     private companion object {
         const val TAG = "MoteurCandidature"

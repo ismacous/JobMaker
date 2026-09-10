@@ -19,16 +19,21 @@ import com.jobmaker.llm.GenerationParams
 import com.jobmaker.llm.LlmException
 import com.jobmaker.llm.LlmRuntime
 import com.jobmaker.llm.ModelManager
+import com.jobmaker.llm.TraceAppel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlin.math.max
 import kotlin.math.min
 
 sealed interface PipelineEvent {
     data class Etape(val index: Int, val total: Int, val titre: String, val detail: String) : PipelineEvent
     data class Modele(val nom: String) : PipelineEvent
-    data class Jeton(val texte: String) : PipelineEvent
+    /** Texte produit depuis le dernier evenement, et son cout en tokens. */
+    data class Jeton(val texte: String, val tokens: Int) : PipelineEvent
+    /** Bilan chiffre d'un appel au modele, une fois l'appel termine. */
+    data class Mesure(val trace: TraceAppel) : PipelineEvent
     /** Avancement de la lecture du prompt, avant que le modele n'ecrive. */
     data class Lecture(val lus: Int, val total: Int, val dureeMs: Long) : PipelineEvent
     data class Avertissement(val message: String) : PipelineEvent
@@ -79,15 +84,18 @@ class Orchestrator(
             val (prepModel, prepNoThink) = charger(AgentRole.ANALYSIS, settings)
             send(PipelineEvent.Modele(prepModel))
 
-            val digest = digestAdapte(profile, settings)
+            val offreUtile = tronquerOffre(offre) { trySend(PipelineEvent.Avertissement(it)) }
+            val digest = digestAdapte(profile, settings, offreUtile)
             val dossier = runtime.generateJson(
                 serializer = DossierPreparation.serializer(),
                 system = Prompts.preparationSystem,
-                user = Prompts.preparationUser(offre, digest.texte),
-                params = GenerationParams.precise(maxTokens = 1800),
+                user = Prompts.preparationUser(offreUtile, digest.texte),
+                params = GenerationParams.precise(maxTokens = MAX_PREPARATION),
                 suppressReasoning = prepNoThink,
+                etape = "Analyse et strategie",
                 onLecturePrompt = { lus, t, ms -> trySend(PipelineEvent.Lecture(lus, t, ms)) },
-                onToken = { trySend(PipelineEvent.Jeton(it)) },
+                onToken = { texte, n -> trySend(PipelineEvent.Jeton(texte, n)) },
+                onTrace = { trySend(PipelineEvent.Mesure(it)) },
             )
             val analyse = dossier.analyse
             if (analyse.annonceIncomplete) {
@@ -114,10 +122,12 @@ class Orchestrator(
                     profile.identite.nomComplet, langue,
                     profile.recherche.disponibilite, settings.cvUnePage,
                 ),
-                params = GenerationParams.writing(maxTokens = 3200),
+                params = GenerationParams.writing(maxTokens = MAX_REDACTION),
                 suppressReasoning = redactionNoThink,
+                etape = "Redaction CV + lettre",
                 onLecturePrompt = { lus, t, ms -> trySend(PipelineEvent.Lecture(lus, t, ms)) },
-                onToken = { trySend(PipelineEvent.Jeton(it)) },
+                onToken = { texte, n -> trySend(PipelineEvent.Jeton(texte, n)) },
+                onTrace = { trySend(PipelineEvent.Mesure(it)) },
             )
 
             var cv = completerDepuisProfil(rediges.cv, profile, langue)
@@ -187,7 +197,7 @@ class Orchestrator(
         settings: Settings,
     ): Flow<PipelineEvent> = channelFlow {
         try {
-            val digest = digestAdapte(profile, settings)
+            val digest = digestAdapte(profile, settings, candidature.offreTexte)
             val langue = candidature.cv.langue.ifBlank { "fr" }
             val resultat = relireEtCorriger(
                 profile, settings, candidature.analyse, candidature.strategie, digest,
@@ -280,10 +290,12 @@ class Orchestrator(
                             analyse, strategie, digest.texte,
                             prettyJson.encodeToString(cv), revue, langue,
                         ),
-                        params = GenerationParams.writing(maxTokens = 2200),
+                        params = GenerationParams.writing(maxTokens = MAX_CORRECTION_CV),
                         suppressReasoning = correctionNoThink,
+                        etape = "Correction du CV",
                         onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
-                        onToken = { emettre(PipelineEvent.Jeton(it)) },
+                        onToken = { texte, n -> emettre(PipelineEvent.Jeton(texte, n)) },
+                        onTrace = { emettre(PipelineEvent.Mesure(it)) },
                     )
                 }.getOrNull()
                 if (cvCorrige != null) cv = completerDepuisProfil(cvCorrige, profile, langue)
@@ -299,10 +311,12 @@ class Orchestrator(
                                 analyse, digest.texte,
                                 prettyJson.encodeToString(lettre), revue, langue,
                             ),
-                            params = GenerationParams.writing(maxTokens = 1600),
+                            params = GenerationParams.writing(maxTokens = MAX_CORRECTION_LETTRE),
                             suppressReasoning = correctionNoThink,
+                            etape = "Correction de la lettre",
                             onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
-                            onToken = { emettre(PipelineEvent.Jeton(it)) },
+                            onToken = { texte, n -> emettre(PipelineEvent.Jeton(texte, n)) },
+                            onTrace = { emettre(PipelineEvent.Mesure(it)) },
                         )
                     }.getOrNull()
                     if (lettreCorrigee != null) {
@@ -337,17 +351,20 @@ class Orchestrator(
             val (model, noThink) = charger(AgentRole.EXPLAIN, settings)
             send(PipelineEvent.Modele(model))
 
+            val offreUtile = tronquerOffre(offre) { trySend(PipelineEvent.Avertissement(it)) }
             val digest = if (profile.identite.nomComplet.isBlank()) ProfileDigest("", emptyMap())
-            else digestAdapte(profile, settings)
+            else digestAdapte(profile, settings, offreUtile)
 
             val explication = runtime.generateJson(
                 serializer = JobExplanation.serializer(),
                 system = Prompts.explicateurSystem,
-                user = Prompts.explicateurUser(offre, digest.texte),
-                params = GenerationParams.explaining(maxTokens = 2400),
+                user = Prompts.explicateurUser(offreUtile, digest.texte),
+                params = GenerationParams.explaining(maxTokens = MAX_EXPLICATION),
                 suppressReasoning = noThink,
+                etape = "Explication du poste",
                 onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
-                onToken = { trySend(PipelineEvent.Jeton(it)) },
+                onToken = { texte, n -> trySend(PipelineEvent.Jeton(texte, n)) },
+                onTrace = { trySend(PipelineEvent.Mesure(it)) },
             )
             send(PipelineEvent.ExplicationPrete(explication))
         } catch (e: Exception) {
@@ -389,16 +406,56 @@ class Orchestrator(
     }
 
     /**
-     * Choisit entre profil detaille et profil resume selon la place disponible
-     * dans la fenetre de contexte du modele charge.
+     * Choisit entre profil detaille et profil resume selon la place que les
+     * autres morceaux du prompt laissent reellement.
+     *
+     * L'ancienne regle -- la moitie du contexte -- ignorait le budget
+     * d'ecriture. Or celui-ci n'est pas une limite souple : il s'additionne au
+     * prompt dans la meme fenetre, et le moteur refuse de demarrer quand la
+     * somme deborde. Avec un contexte de 6144, un profil fourni et un budget
+     * d'ecriture large, l'etape de redaction echouait avant d'ecrire un seul
+     * mot. On dimensionne donc sur l'etape la plus lourde des deux.
      */
-    private suspend fun digestAdapte(profile: Profile, settings: Settings): ProfileDigest {
-        val complet = ProfileSerializer.digest(profile)
+    private suspend fun digestAdapte(
+        profile: Profile,
+        settings: Settings,
+        offre: String,
+    ): ProfileDigest {
         val contexte = runtime.currentModel?.contextSize ?: settings.tailleContexte
-        // On reserve la moitie du contexte au prompt systeme, a l'offre et a la sortie.
-        val budget = contexte / 2
-        val tokens = runtime.tokenCount(complet.texte)
-        return if (tokens <= budget) complet else ProfileSerializer.digestCourt(profile)
+
+        val reserveAnalyse = runtime.estimateTokens(Prompts.preparationSystem) +
+            runtime.estimateTokens(offre) + MAX_PREPARATION
+        val reserveRedaction = runtime.estimateTokens(Prompts.redactionSystem) +
+            TOKENS_RESUME_ETAPE1 + MAX_REDACTION
+        val budget = contexte - max(reserveAnalyse, reserveRedaction) -
+            LlmRuntime.MARGE_CONTEXTE - MARGE_PROMPT
+
+        val complet = ProfileSerializer.digest(profile)
+        if (budget > 0 && runtime.tokenCount(complet.texte) <= budget) return complet
+
+        val court = ProfileSerializer.digestCourt(profile)
+        Log.i(TAG, "Profil resume : budget $budget tokens dans un contexte de $contexte")
+        return court
+    }
+
+    /**
+     * Ramene une annonce demesuree a ce que le contexte peut absorber.
+     *
+     * Une offre collee depuis un site d'emploi traine souvent la page entiere :
+     * menus, offres voisines, mentions legales. Sans garde-fou, tout cela est
+     * lu par le modele -- du temps depense a la lecture, et de la place prise
+     * au profil, qui est la seule source de faits.
+     */
+    private fun tronquerOffre(offre: String, avertir: (String) -> Unit): String {
+        val propre = offre.trim()
+        if (runtime.estimateTokens(propre) <= MAX_OFFRE) return propre
+        val coupe = propre.take((MAX_OFFRE * 3.2).toInt())
+        avertir(
+            "Annonce tres longue (${propre.length} caracteres) : seules les " +
+                "${coupe.length} premieres ont ete lues. Si l'essentiel de l'offre se " +
+                "trouve plus bas, recollez uniquement la partie utile."
+        )
+        return coupe
     }
 
     private fun langueSortie(settings: Settings, analyse: JobAnalysis): String =
@@ -544,5 +601,39 @@ class Orchestrator(
         )
     }
 
-    private companion object { const val TAG = "Orchestrator" }
+    private companion object {
+        const val TAG = "Orchestrator"
+
+        // ---------------------------------------------------------------
+        // Budgets d'ecriture.
+        //
+        // Ce ne sont pas des garde-fous theoriques. Un budget sert deux fois :
+        // il borne ce que le modele peut ecrire avant qu'on l'arrete, et il est
+        // reserve dans la fenetre de contexte, donc retire au prompt. Trop
+        // large, il coute du temps quand le modele part en boucle, et de la
+        // place quand il se tient bien.
+        //
+        // Les valeurs sont celles que la sortie demande reellement :
+        // - une lettre de 250 a 330 mots pese 400 a 550 tokens en francais ;
+        // - un CV d'une page en JSON, 700 a 900 ;
+        // - l'analyse et la strategie, 800 a 1000.
+        // La generation s'arrete de toute facon des que l'objet JSON se
+        // referme : ces plafonds ne servent qu'aux reponses qui derapent.
+        // ---------------------------------------------------------------
+        const val MAX_PREPARATION = 1200
+        const val MAX_REDACTION = 1800
+        const val MAX_RELECTURE = 1000
+        const val MAX_CORRECTION_CV = 1400
+        const val MAX_CORRECTION_LETTRE = 900
+        const val MAX_EXPLICATION = 1200
+
+        /** Taille typique du resume d'annonce + strategie injecte a l'etape 2. */
+        const val TOKENS_RESUME_ETAPE1 = 900
+
+        /** Ecart admis entre l'estimation par caracteres et la vraie tokenisation. */
+        const val MARGE_PROMPT = 200
+
+        /** Au-dela, une annonce collee contient surtout la page du site. */
+        const val MAX_OFFRE = 1600
+    }
 }

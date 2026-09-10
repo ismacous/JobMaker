@@ -103,6 +103,74 @@ corrige les guillemets typographiques. Ce n'est qu'en dernier recours que
 `LlmJson` redemande au modèle de corriger sa propre sortie — et sur quelques
 dizaines de tokens, pas sur toute la génération.
 
+### Ce qui fait qu'une génération est longue, et ce qui la borne
+
+Le temps d'une génération se décompose en deux phases que rien ne permet de
+confondre : la **lecture du prompt**, où le modèle avale les consignes, l'offre
+et le profil sans rien écrire, et l'**écriture**, où il produit un token à la
+fois. Sur un téléphone, la première va vite (calcul par lots) et la seconde est
+lente (limitée par la bande passante mémoire). Une génération qui dure vient
+donc presque toujours d'un excès de tokens écrits, pas d'un excès de texte lu.
+
+Quatre mécanismes bornent cette écriture.
+
+**Arrêt dès que le JSON se referme.** `DetecteurJsonComplet` suit la profondeur
+des accolades au fil des tokens, en ignorant celles qui sont dans une chaîne et
+celles d'un éventuel bloc `<think>`. Dès que l'objet de premier niveau se
+referme, la génération s'arrête. Sans cela, un petit modèle répond juste, puis
+continue — remerciements, second objet, commentaires — jusqu'à épuiser son
+budget. C'est le garde-fou qui compte le plus : le jeton de fin, lui, n'est pas
+toujours émis.
+
+**Un budget de tokens dimensionné sur la sortie réelle.** Une lettre de 250 à
+330 mots pèse 400 à 550 tokens ; un CV d'une page en JSON, 700 à 900. Les
+plafonds d'`Orchestrator` sont réglés là-dessus. Un budget large n'est pas
+neutre : il est *réservé* dans la fenêtre de contexte, donc retiré au prompt.
+`nativeBeginGenerate` refuse de démarrer quand prompt + budget dépasse le
+contexte — un budget généreux « au cas où » faisait échouer l'étape de rédaction
+avant le premier mot.
+
+**Un profil dimensionné sur l'étape la plus lourde.** `digestAdapte` calcule ce
+que les consignes système, l'offre et le budget d'écriture laissent réellement,
+et bascule sur un profil résumé si le profil complet n'y tient pas. Une offre
+collée avec la page entière du site est tronquée, avec un avertissement.
+
+**Pas de pénalité de répétition sur les étapes qui structurent.** Les tokens les
+plus répétés d'une réponse JSON sont ceux qui la rendent valide : guillemets,
+deux-points, virgules, accolades, noms de champs. Les pénaliser pousse le modèle
+à s'en écarter, donc à produire du JSON cassé — qu'il faut ensuite faire réparer
+par un second appel complet, c'est-à-dire payer l'étape deux fois. Les étapes de
+rédaction gardent une pénalité faible et une fenêtre courte, pour empêcher une
+phrase de tourner en boucle, pas pour diversifier le vocabulaire : c'est la
+graine, tirée au hasard à chaque appel, qui change les formulations.
+
+### Le fil principal ne doit rien avoir à faire pendant la génération
+
+Le texte produit ne remonte pas token par token. Il est regroupé et envoyé au
+plus huit fois par seconde, et la notification de progression n'est redessinée
+qu'une fois par seconde.
+
+Ce n'est pas du confort d'affichage. Chaque remontée déclenche une mise à jour
+d'état, une recomposition Compose et une transaction vers le serveur système ;
+au-delà de cinq notifications par seconde, Android les jette tout en faisant
+payer le travail. Pendant ce temps, les threads de calcul de ggml se
+synchronisent à chaque couche du modèle : le plus lent impose son rythme à tous,
+et chaque préemption d'un seul d'entre eux se paie sur le token entier. C'était
+la principale différence entre le banc de mesure — qui ne remonte rien et
+trouvait le moteur rapide — et une vraie génération.
+
+### Chaque étape rend ses chiffres
+
+`TraceAppel` enregistre, pour chaque appel au modèle : tokens lus et durée,
+tokens écrits et durée, budget accordé, et **pourquoi** la génération s'est
+arrêtée (jeton de fin, JSON refermé, budget épuisé, contexte plein). L'écran de
+génération en fait un bilan copiable.
+
+Une lenteur ne se corrige pas sur une impression. Ces quatre lignes disent
+immédiatement laquelle des deux phases coûte, si le modèle a su s'arrêter ou
+s'il a rempli son budget, et si la vitesse s'effondre entre la première et la
+dernière étape — signe que le téléphone chauffe et se bride.
+
 ### Identité injectée au rendu
 
 `HtmlRenderer` lit le nom, le téléphone, l'adresse, l'email et les liens

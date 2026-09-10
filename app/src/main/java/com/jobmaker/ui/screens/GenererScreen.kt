@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -46,10 +47,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.jobmaker.llm.CompteursSysteme
 import com.jobmaker.ui.components.Bandeau
+import com.jobmaker.ui.components.SectionCarte
 import com.jobmaker.ui.components.TexteDefilant
 import com.jobmaker.ui.components.TypeBandeau
 import com.jobmaker.ui.vm.GenerateViewModel
@@ -235,6 +240,10 @@ fun GenererScreen(
                 }
             }
 
+            // Uniquement une fois la generation finie : construire ce texte a
+            // chaque rafraichissement pendant qu'elle tourne ne servirait a rien.
+            if (!etat.enCours) BilanGeneration(etat.rapport())
+
             Spacer(Modifier.height(28.dp))
         }
     }
@@ -413,6 +422,40 @@ private fun ProgressionGeneration(vm: GenerateViewModel) {
             onClick = { demandeInterruption = true },
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
         ) { Text("Interrompre") }
+    }
+}
+
+/**
+ * Bilan chiffre de la generation qui vient de finir, replie par defaut.
+ *
+ * Une lenteur ne se corrige pas sur une impression : il faut savoir laquelle
+ * des deux phases coute, combien de tokens ont ete ecrits pour de vrai, et
+ * pourquoi chaque etape s'est arretee. Le bouton de copie existe pour que ces
+ * chiffres puissent quitter le telephone tels quels.
+ */
+@Composable
+private fun BilanGeneration(rapport: String) {
+    if (rapport.isBlank()) return
+    val presse = LocalClipboardManager.current
+
+    Spacer(Modifier.height(8.dp))
+    SectionCarte(
+        titre = "Details techniques",
+        sousTitre = "Ou est passe le temps",
+        replierParDefaut = true,
+    ) {
+        Text(
+            rapport,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+            ),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        )
+        OutlinedButton(
+            onClick = { presse.setText(AnnotatedString(rapport)) },
+            modifier = Modifier.padding(top = 8.dp),
+        ) { Text("Copier le bilan") }
     }
 }
 

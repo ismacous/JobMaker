@@ -1,5 +1,8 @@
 package com.jobmaker.work
 
+import com.jobmaker.llm.RaisonArret
+import com.jobmaker.llm.TraceAppel
+
 /**
  * Ou en est le modele. La distinction compte : la lecture du prompt est une
  * phase pendant laquelle rien ne s'ecrit, et sans la nommer on croit
@@ -32,6 +35,10 @@ data class EtatGeneration(
     val msLecturePrompt: Long = 0L,
     val tokensEcrits: Int = 0,
     val debutRedactionMs: Long = 0L,
+    /** Bilan chiffre de chaque appel au modele, dans l'ordre. */
+    val traces: List<TraceAppel> = emptyList(),
+    /** Duree totale de la generation, renseignee a la fin. */
+    val dureeTotaleMs: Long = 0L,
 ) {
     val progression: Float
         get() = if (etapesTotal == 0) 0f else etapeIndex.toFloat() / etapesTotal
@@ -50,4 +57,55 @@ data class EtatGeneration(
     /** Avancement de la lecture du prompt, de 0 a 1. */
     val progressionLecture: Float
         get() = if (promptTotal <= 0) 0f else (promptLus.toFloat() / promptTotal).coerceIn(0f, 1f)
+
+    /**
+     * Compte-rendu copiable de la generation.
+     *
+     * Sans lui, une lenteur ne se discute qu'avec des impressions. Avec lui on
+     * voit d'un coup d'oeil laquelle des deux phases coute, si le modele a
+     * ecrit ce qu'il fallait ou s'il a rempli son budget, et si la vitesse
+     * s'effondre entre la premiere etape et la derniere -- signe que le
+     * telephone chauffe et se bride.
+     */
+    fun rapport(): String = buildString {
+        if (traces.isEmpty()) return ""
+        appendLine("BILAN DE LA GENERATION")
+        if (modeleActuel.isNotBlank()) appendLine("Modele : $modeleActuel")
+        appendLine("Duree totale : %.1f s".format(dureeTotaleMs / 1000.0))
+        appendLine()
+        traces.forEach { appendLine(it.ligne()) }
+        appendLine()
+
+        val lus = traces.sumOf { it.tokensPrompt }
+        val ecrits = traces.sumOf { it.tokensEcrits }
+        val msLecture = traces.sumOf { it.msPrompt }
+        val msEcriture = traces.sumOf { it.msEcriture }
+        appendLine("Total lu    : $lus tokens en %.1f s (%.1f tok/s)".format(
+            msLecture / 1000.0, lus * 1000.0 / msLecture.coerceAtLeast(1)))
+        appendLine("Total ecrit : $ecrits tokens en %.1f s (%.1f tok/s)".format(
+            msEcriture / 1000.0, ecrits * 1000.0 / msEcriture.coerceAtLeast(1)))
+
+        val hors = dureeTotaleMs - msLecture - msEcriture
+        if (hors > 1000) {
+            appendLine("Hors modele : %.1f s (chargement, verifications, ecriture disque)"
+                .format(hors / 1000.0))
+        }
+
+        val budgets = traces.count { it.raison == RaisonArret.BUDGET_EPUISE }
+        if (budgets > 0) {
+            appendLine()
+            appendLine("$budgets etape(s) ont epuise leur budget de tokens : le modele n'a " +
+                "pas su s'arreter. C'est la premiere cause de lenteur a corriger.")
+        }
+        val premiere = traces.firstOrNull { it.tokensEcrits > 20 }
+        val derniere = traces.lastOrNull { it.tokensEcrits > 20 }
+        if (premiere != null && derniere != null && premiere !== derniere &&
+            derniere.ecritureParSeconde < premiere.ecritureParSeconde * 0.6
+        ) {
+            appendLine()
+            appendLine("La vitesse d'ecriture a chute de %.1f a %.1f tok/s entre la premiere et "
+                .format(premiere.ecritureParSeconde, derniere.ecritureParSeconde) +
+                "la derniere etape : le telephone chauffe et se bride, ou la memoire manque.")
+        }
+    }.trim()
 }
