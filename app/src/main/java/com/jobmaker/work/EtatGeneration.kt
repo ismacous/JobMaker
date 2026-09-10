@@ -21,6 +21,8 @@ data class EtatGeneration(
     val etapeTitre: String = "",
     val etapeDetail: String = "",
     val modeleActuel: String = "",
+    /** Reglage effectif du moteur : fenetre, threads, mode de chargement. */
+    val modeleDetail: String = "",
     /** Derniers tokens produits, pour montrer que ca avance. */
     val apercuBrut: String = "",
     val avertissements: List<String> = emptyList(),
@@ -71,9 +73,13 @@ data class EtatGeneration(
         if (traces.isEmpty()) return ""
         appendLine("BILAN DE LA GENERATION")
         if (modeleActuel.isNotBlank()) appendLine("Modele : $modeleActuel")
+        if (modeleDetail.isNotBlank()) appendLine("Reglage : $modeleDetail")
         appendLine("Duree totale : %.1f s".format(dureeTotaleMs / 1000.0))
         appendLine()
-        traces.forEach { appendLine(it.ligne()) }
+        traces.forEach {
+            appendLine(it.ligne())
+            appendLine(it.ligneMachine())
+        }
         appendLine()
 
         val lus = traces.sumOf { it.tokensPrompt }
@@ -97,15 +103,36 @@ data class EtatGeneration(
             appendLine("$budgets etape(s) ont epuise leur budget de tokens : le modele n'a " +
                 "pas su s'arreter. C'est la premiere cause de lenteur a corriger.")
         }
+        // Ces deux verdicts se contredisent, et c'est voulu : ils ne peuvent pas
+        // etre vrais en meme temps. Des coeurs pleins avec une vitesse qui
+        // s'effondre, c'est la chauffe. Des coeurs vides avec des defauts
+        // majeurs, c'est le modele qu'Android evince et qu'il faut relire.
+        val defauts = traces.sumOf { it.compteurs.defautsMajeurs }
+        val occupation = traces.filter { it.totalMs > 1000 }
+        val coeursMoyens = if (occupation.isEmpty()) 0.0
+        else occupation.sumOf { it.compteurs.msProcesseur }.toDouble() /
+            occupation.sumOf { it.totalMs }.coerceAtLeast(1)
+
+        if (defauts > 1000) {
+            appendLine()
+            appendLine("$defauts pages du modele ont du etre relues sur le stockage : Android " +
+                "evince les poids faute de memoire. Reduisez la taille de contexte dans " +
+                "Reglages, ou fermez les autres applications.")
+        }
         val premiere = traces.firstOrNull { it.tokensEcrits > 20 }
         val derniere = traces.lastOrNull { it.tokensEcrits > 20 }
         if (premiere != null && derniere != null && premiere !== derniere &&
             derniere.ecritureParSeconde < premiere.ecritureParSeconde * 0.6
         ) {
             appendLine()
-            appendLine("La vitesse d'ecriture a chute de %.1f a %.1f tok/s entre la premiere et "
-                .format(premiere.ecritureParSeconde, derniere.ecritureParSeconde) +
-                "la derniere etape : le telephone chauffe et se bride, ou la memoire manque.")
+            append("La vitesse d'ecriture a chute de %.1f a %.1f tok/s entre la premiere et "
+                .format(premiere.ecritureParSeconde, derniere.ecritureParSeconde))
+            appendLine(
+                if (coeursMoyens >= 3.0)
+                    "la derniere etape, coeurs pleins : le telephone chauffe et se bride."
+                else
+                    "la derniere etape, coeurs a moitie vides : il attend la memoire."
+            )
         }
     }.trim()
 }

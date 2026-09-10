@@ -162,6 +162,28 @@ data class DossierPreparation(
  * partir du meme dossier. Les separer coutait une relecture complete du
  * contexte -- plusieurs minutes sur un telephone.
  */
+/**
+ * Sortie de l'appel unique : tout ce qu'une candidature demande, produit d'une
+ * traite.
+ *
+ * Deux appels successifs coutaient deux fois le prompt -- consignes, annonce et
+ * profil relus depuis zero -- plus la mise par ecrit d'une analyse dont le seul
+ * lecteur etait l'appel suivant. Mesure sur un S25 Ultra : 8300 tokens lus et
+ * 2400 ecrits pour 1500 tokens utiles.
+ *
+ * L'ordre des champs est le raisonnement : le modele constate d'abord ce que
+ * l'annonce demande, en tire un angle, et n'ecrit qu'ensuite. Il reflechit donc
+ * toujours avant de rediger, mais en trois cents tokens au lieu de mille deux
+ * cents, et sans avoir a tout relire pour s'en servir.
+ */
+@Serializable
+data class DossierComplet(
+    val analyse: JobAnalysis = JobAnalysis(),
+    val strategie: Strategy = Strategy(),
+    val cv: CvContent = CvContent(),
+    val lettre: LetterContent = LetterContent(),
+)
+
 @Serializable
 data class DocumentsRediges(
     val cv: CvContent = CvContent(),

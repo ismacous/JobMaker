@@ -231,7 +231,8 @@ void clear_kv(Session* s) {
 JNI_FN(jlong)
 Java_com_jobmaker_llm_LlamaBridge_nativeLoad(JNIEnv* env, jobject /*thiz*/,
                                              jstring jpath, jint n_ctx,
-                                             jint n_threads, jint n_gpu_layers,
+                                             jint n_threads, jint n_threads_batch,
+                                             jint n_gpu_layers,
                                              jboolean use_mmap) {
     ensure_backend();
     const std::string path = to_utf8(env, jpath);
@@ -264,8 +265,14 @@ Java_com_jobmaker_llm_LlamaBridge_nativeLoad(JNIEnv* env, jobject /*thiz*/,
     // donnent aux multiplications de matrices une forme plus favorable.
     cp.n_batch   = 512;
     cp.n_ubatch  = 512;
+    // Deux reglages distincts, parce que les deux phases ne butent pas sur la
+    // meme limite. Ecrire un token oblige a relire tout le modele : c'est la
+    // bande passante memoire qui plafonne, et au-dela de quatre threads les
+    // suivants attendent la memoire sans rien produire -- ils ne font que
+    // chauffer le telephone, qui se bride ensuite. Lire le prompt, au
+    // contraire, calcule vraiment : chaque thread supplementaire y sert.
     cp.n_threads = n_threads;
-    cp.n_threads_batch = n_threads;
+    cp.n_threads_batch = n_threads_batch > 0 ? n_threads_batch : n_threads;
     cp.no_perf   = true;
 
     llama_context* ctx = llama_init_from_model(model, cp);
@@ -281,8 +288,8 @@ Java_com_jobmaker_llm_LlamaBridge_nativeLoad(JNIEnv* env, jobject /*thiz*/,
     s->vocab = llama_model_get_vocab(model);
     s->n_ctx = static_cast<int>(llama_n_ctx(ctx));
 
-    LOGI("Modele charge : %s (n_ctx=%d, threads=%d, mmap=%d)",
-         path.c_str(), s->n_ctx, n_threads, mp.use_mmap ? 1 : 0);
+    LOGI("Modele charge : %s (n_ctx=%d, threads=%d/%d, mmap=%d)",
+         path.c_str(), s->n_ctx, n_threads, cp.n_threads_batch, mp.use_mmap ? 1 : 0);
     return reinterpret_cast<jlong>(s);
 }
 
@@ -532,11 +539,13 @@ Java_com_jobmaker_llm_LlamaBridge_nativeEndGenerate(JNIEnv* /*env*/, jobject /*t
 
 JNI_FN(void)
 Java_com_jobmaker_llm_LlamaBridge_nativeSetThreads(JNIEnv* /*env*/, jobject /*thiz*/,
-                                                   jlong handle, jint n_threads) {
+                                                   jlong handle, jint n_threads,
+                                                   jint n_threads_batch) {
     Session* s = as_session(handle);
     if (s == nullptr) return;
     std::lock_guard<std::mutex> lock(s->mu);
-    llama_set_n_threads(s->ctx, n_threads, n_threads);
+    llama_set_n_threads(s->ctx, n_threads,
+                        n_threads_batch > 0 ? n_threads_batch : n_threads);
 }
 
 /**

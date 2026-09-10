@@ -4,6 +4,7 @@ import android.util.Log
 import com.jobmaker.data.model.Candidature
 import com.jobmaker.data.model.CvContent
 import com.jobmaker.data.model.DocumentsRediges
+import com.jobmaker.data.model.DossierComplet
 import com.jobmaker.data.model.DossierPreparation
 import com.jobmaker.data.model.JobAnalysis
 import com.jobmaker.data.model.JobExplanation
@@ -29,7 +30,8 @@ import kotlin.math.min
 
 sealed interface PipelineEvent {
     data class Etape(val index: Int, val total: Int, val titre: String, val detail: String) : PipelineEvent
-    data class Modele(val nom: String) : PipelineEvent
+    /** [detail] decrit le reglage effectif : fenetre, threads, mode de chargement. */
+    data class Modele(val nom: String, val detail: String = "") : PipelineEvent
     /** Texte produit depuis le dernier evenement, et son cout en tokens. */
     data class Jeton(val texte: String, val tokens: Int) : PipelineEvent
     /** Bilan chiffre d'un appel au modele, une fois l'appel termine. */
@@ -70,7 +72,8 @@ class Orchestrator(
         candidatureExistante: Candidature? = null,
     ): Flow<PipelineEvent> = channelFlow {
         val relecture = settings.relectureActive
-        val total = if (relecture) 4 else 2
+        val etapesRedaction = if (settings.analyseApprofondie) 2 else 1
+        val total = etapesRedaction + if (relecture) 2 else 0
 
         try {
             require(offre.isNotBlank()) { "Collez d'abord le texte de l'offre." }
@@ -78,26 +81,14 @@ class Orchestrator(
                 "Renseignez au moins votre nom dans l'onglet Profil."
             }
 
-            // ---------- 1. Analyse de l'offre et strategie ----------
-            send(PipelineEvent.Etape(1, total, "Analyse et strategie",
-                "Lecture de l'annonce et choix de l'angle de candidature"))
-            val (prepModel, prepNoThink) = charger(AgentRole.ANALYSIS, settings)
-            send(PipelineEvent.Modele(prepModel))
-
             val offreUtile = tronquerOffre(offre) { trySend(PipelineEvent.Avertissement(it)) }
-            val digest = digestAdapte(profile, settings, offreUtile)
-            val dossier = runtime.generateJson(
-                serializer = DossierPreparation.serializer(),
-                system = Prompts.preparationSystem,
-                user = Prompts.preparationUser(offreUtile, digest.texte),
-                params = GenerationParams.precise(maxTokens = MAX_PREPARATION),
-                suppressReasoning = prepNoThink,
-                etape = "Analyse et strategie",
-                onLecturePrompt = { lus, t, ms -> trySend(PipelineEvent.Lecture(lus, t, ms)) },
-                onToken = { texte, n -> trySend(PipelineEvent.Jeton(texte, n)) },
-                onTrace = { trySend(PipelineEvent.Mesure(it)) },
-            )
-            val analyse = dossier.analyse
+            val produit = if (settings.analyseApprofondie) {
+                enDeuxTemps(offreUtile, profile, settings, total) { trySend(it) }
+            } else {
+                enUnSeulAppel(offreUtile, profile, settings, total) { trySend(it) }
+            }
+
+            val analyse = produit.dossier.analyse
             if (analyse.annonceIncomplete) {
                 send(PipelineEvent.Avertissement(
                     "Annonce peu detaillee : l'analyse a complete avec ce que ce metier " +
@@ -105,40 +96,18 @@ class Orchestrator(
                 ))
             }
 
-            val langue = langueSortie(settings, analyse)
-            val strategie = remapperIdentifiants(dossier.strategie, digest)
-
-            // ---------- 2. Redaction du CV et de la lettre ----------
-            send(PipelineEvent.Etape(2, total, "Redaction",
-                "Ecriture du CV et de la lettre de motivation"))
-            val (redactionModel, redactionNoThink) = charger(AgentRole.WRITING, settings)
-            send(PipelineEvent.Modele(redactionModel))
-
-            val rediges = runtime.generateJson(
-                serializer = DocumentsRediges.serializer(),
-                system = Prompts.redactionSystem,
-                user = Prompts.redactionUser(
-                    analyse, strategie, digest.texte,
-                    profile.identite.nomComplet, langue,
-                    profile.recherche.disponibilite, settings.cvUnePage,
-                ),
-                params = GenerationParams.writing(maxTokens = MAX_REDACTION),
-                suppressReasoning = redactionNoThink,
-                etape = "Redaction CV + lettre",
-                onLecturePrompt = { lus, t, ms -> trySend(PipelineEvent.Lecture(lus, t, ms)) },
-                onToken = { texte, n -> trySend(PipelineEvent.Jeton(texte, n)) },
-                onTrace = { trySend(PipelineEvent.Mesure(it)) },
-            )
-
-            var cv = completerDepuisProfil(rediges.cv, profile, langue)
-            var lettre = completerLettre(rediges.lettre, profile, analyse, langue)
+            val digest = produit.digest
+            val langue = produit.langue
+            val strategie = produit.dossier.strategie
+            var cv = completerDepuisProfil(produit.dossier.cv, profile, langue)
+            var lettre = completerLettre(produit.dossier.lettre, profile, analyse, langue)
 
             var revue = Review()
 
             if (relecture) {
                 val etapes = relireEtCorriger(
                     profile, settings, analyse, strategie, digest, langue, cv, lettre,
-                    premiereEtape = 3, total = total,
+                    premiereEtape = etapesRedaction + 1, total = total,
                 ) { trySend(it) }
                 cv = etapes.cv
                 lettre = etapes.lettre
@@ -171,6 +140,148 @@ class Orchestrator(
             Log.e(TAG, "Echec du pipeline", e)
             send(PipelineEvent.Echec(e.message ?: "Erreur inattendue"))
         }
+    }
+
+    /** Ce que produit un chemin de generation, quel qu'il soit. */
+    private data class Produit(
+        val dossier: DossierComplet,
+        val digest: ProfileDigest,
+        val langue: String,
+    )
+
+    /**
+     * Chemin par defaut : un seul appel au modele.
+     *
+     * Le decoupage en deux appels coutait deux fois le prompt -- consignes,
+     * annonce et profil relus depuis zero -- plus la mise par ecrit d'une
+     * analyse complete dont le seul lecteur etait l'appel suivant. Mesure sur
+     * un S25 Ultra : 8300 tokens lus et 2400 ecrits, pour 1500 tokens utiles,
+     * soit vingt-quatre minutes.
+     *
+     * Le modele raisonne toujours avant d'ecrire : les champs "analyse" et
+     * "strategie" viennent en tete du schema, il les remplit donc en premier et
+     * les relit ensuite -- mais dans la meme reponse, sans rien recalculer.
+     */
+    private suspend fun enUnSeulAppel(
+        offre: String,
+        profile: Profile,
+        settings: Settings,
+        total: Int,
+        emettre: (PipelineEvent) -> Unit,
+    ): Produit {
+        emettre(PipelineEvent.Etape(1, total, "Redaction",
+            "Analyse de l'annonce, puis ecriture du CV et de la lettre"))
+
+        // Le profil est mis en forme avant le chargement : sa taille reelle
+        // decide de la fenetre a reserver, et donc de la memoire prise par le
+        // cache d'attention. Une fenetre de 10240 la ou 6144 suffisent reserve
+        // un demi-gigaoctet pour rien -- qu'Android reprend en evincant les
+        // pages du modele, qu'il faut alors relire sur le stockage.
+        val digest = digestAdapte(profile, settings, offre)
+        val langue = langueSortie(settings, offre)
+        val contexte = contexteVoulu(
+            settings,
+            tokensPrompt = runtime.estimateTokens(Prompts.candidatureSystem) +
+                runtime.estimateTokens(offre) + runtime.estimateTokens(digest.texte),
+            budgetEcriture = MAX_APPEL_UNIQUE,
+        )
+
+        val (modele, noThink) = charger(AgentRole.WRITING, settings, contexte)
+        emettre(PipelineEvent.Modele(modele, detailMoteur(settings)))
+
+        val dossier = runtime.generateJson(
+            serializer = DossierComplet.serializer(),
+            system = Prompts.candidatureSystem,
+            user = Prompts.candidatureUser(
+                offre, digest.texte, profile.identite.nomComplet, langue,
+                profile.recherche.disponibilite, settings.cvUnePage,
+            ),
+            params = GenerationParams.writing(maxTokens = MAX_APPEL_UNIQUE),
+            suppressReasoning = noThink,
+            etape = "Candidature complete",
+            onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
+            onToken = { texte, n -> emettre(PipelineEvent.Jeton(texte, n)) },
+            onTrace = { emettre(PipelineEvent.Mesure(it)) },
+        )
+        return Produit(dossier, digest, langue)
+    }
+
+    /**
+     * Chemin "analyse approfondie" : l'annonce est etudiee dans un appel
+     * separe, avec le detail complet -- souhaits, outils, attentes implicites,
+     * ecarts et reponses, experiences classees une a une. Ce detail nourrit
+     * ensuite la redaction et remplit l'onglet "Offre analysee".
+     *
+     * Il se paie : une seconde lecture entiere des consignes, de l'annonce et
+     * du profil, plus un millier de tokens ecrits pour le seul usage de l'appel
+     * suivant. Comptez le double de temps.
+     */
+    private suspend fun enDeuxTemps(
+        offre: String,
+        profile: Profile,
+        settings: Settings,
+        total: Int,
+        emettre: (PipelineEvent) -> Unit,
+    ): Produit {
+        emettre(PipelineEvent.Etape(1, total, "Analyse et strategie",
+            "Lecture de l'annonce et choix de l'angle de candidature"))
+
+        val digest = digestAdapte(profile, settings, offre)
+        // Une seule fenetre pour les deux etapes : en demander deux tailles
+        // differentes rechargerait les 2,5 Go du modele entre elles.
+        val contexte = contexteVoulu(
+            settings,
+            tokensPrompt = max(
+                runtime.estimateTokens(Prompts.preparationSystem) +
+                    runtime.estimateTokens(offre),
+                runtime.estimateTokens(Prompts.redactionSystem) + TOKENS_RESUME_ETAPE1,
+            ) + runtime.estimateTokens(digest.texte),
+            budgetEcriture = max(MAX_PREPARATION, MAX_REDACTION),
+        )
+
+        val (prepModel, prepNoThink) = charger(AgentRole.ANALYSIS, settings, contexte)
+        emettre(PipelineEvent.Modele(prepModel, detailMoteur(settings)))
+
+        val preparation = runtime.generateJson(
+            serializer = DossierPreparation.serializer(),
+            system = Prompts.preparationSystem,
+            user = Prompts.preparationUser(offre, digest.texte),
+            params = GenerationParams.precise(maxTokens = MAX_PREPARATION),
+            suppressReasoning = prepNoThink,
+            etape = "Analyse et strategie",
+            onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
+            onToken = { texte, n -> emettre(PipelineEvent.Jeton(texte, n)) },
+            onTrace = { emettre(PipelineEvent.Mesure(it)) },
+        )
+
+        val analyse = preparation.analyse
+        val langue = langueSortieDepuisAnalyse(settings, analyse)
+        val strategie = remapperIdentifiants(preparation.strategie, digest)
+
+        emettre(PipelineEvent.Etape(2, total, "Redaction",
+            "Ecriture du CV et de la lettre de motivation"))
+        val (redactionModel, redactionNoThink) = charger(AgentRole.WRITING, settings, contexte)
+        emettre(PipelineEvent.Modele(redactionModel))
+
+        val rediges = runtime.generateJson(
+            serializer = DocumentsRediges.serializer(),
+            system = Prompts.redactionSystem,
+            user = Prompts.redactionUser(
+                analyse, strategie, digest.texte,
+                profile.identite.nomComplet, langue,
+                profile.recherche.disponibilite, settings.cvUnePage,
+            ),
+            params = GenerationParams.writing(maxTokens = MAX_REDACTION),
+            suppressReasoning = redactionNoThink,
+            etape = "Redaction CV + lettre",
+            onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
+            onToken = { texte, n -> emettre(PipelineEvent.Jeton(texte, n)) },
+            onTrace = { emettre(PipelineEvent.Mesure(it)) },
+        )
+
+        return Produit(
+            DossierComplet(analyse, strategie, rediges.cv, rediges.lettre), digest, langue,
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -378,8 +489,20 @@ class Orchestrator(
     // Outils internes
     // -----------------------------------------------------------------------
 
-    /** Charge le modele affecte a [role]. Retourne son nom et s'il faut brider son raisonnement. */
-    private suspend fun charger(role: AgentRole, settings: Settings): Pair<String, Boolean> {
+    /**
+     * Charge le modele affecte a [role]. Retourne son nom et s'il faut brider
+     * son raisonnement.
+     *
+     * @param contexte fenetre a reserver. Null : garder celle du modele deja
+     *   resident, ou le plafond des reglages. Chaque valeur differente force un
+     *   rechargement complet des 2,5 Go du modele, alors les etapes d'une meme
+     *   generation doivent toutes demander la meme.
+     */
+    private suspend fun charger(
+        role: AgentRole,
+        settings: Settings,
+        contexte: Int? = null,
+    ): Pair<String, Boolean> {
         val installes = modelManager.installed.value
         if (installes.isEmpty()) {
             throw LlmException(
@@ -391,20 +514,48 @@ class Orchestrator(
         val choisi = installes.firstOrNull { it.id == demande } ?: installes.first()
         val entree = modelManager.catalog.byId(choisi.id)
 
-        val contexte = min(
+        val plafond = min(
             settings.tailleContexte,
             entree?.contextMax ?: settings.tailleContexte,
-        ).coerceAtLeast(2048)
+        )
+        val voulu = contexte
+            ?: runtime.currentModel?.takeIf { it.modelId == choisi.id }?.contextSize
+            ?: plafond
+        val effectif = min(plafond, voulu).coerceAtLeast(2048)
 
         runtime.ensureLoaded(
             modelId = choisi.id,
             filePath = choisi.file.absolutePath,
-            contextSize = contexte,
+            contextSize = effectif,
             threads = settings.threads,
             gpuLayers = settings.couchesGpu,
             chargerEnMemoire = settings.chargerEnMemoire,
         )
         return choisi.displayName to (entree?.emitsReasoning ?: false)
+    }
+
+    /**
+     * Fenetre de contexte a reserver, arrondie au multiple de 512 superieur.
+     *
+     * Elle n'est pas gratuite : llama.cpp alloue le cache d'attention pour la
+     * fenetre entiere des le chargement, qu'on s'en serve ou non. Sur Qwen3 4B
+     * c'est 144 Ko par token, soit 1,5 Go pour une fenetre de 10240 -- a cote
+     * des 2,5 Go du modele, sur un telephone. Ce que l'on reserve en trop,
+     * Android le reprend en evincant les pages du modele, et chaque token
+     * demande alors d'aller les relire sur le stockage.
+     */
+    /** Le reglage effectif du moteur, pour que le bilan dise sur quoi il porte. */
+    private fun detailMoteur(settings: Settings): String {
+        val m = runtime.currentModel ?: return ""
+        return "contexte ${m.contextSize} | ${settings.threads} threads en lecture, " +
+            "${LlmRuntime.threadsEcriture(settings.threads)} en ecriture | poids " +
+            (if (m.enMemoire) "copies en memoire" else "mappes depuis le fichier")
+    }
+
+    private fun contexteVoulu(settings: Settings, tokensPrompt: Int, budgetEcriture: Int): Int {
+        val besoin = tokensPrompt + budgetEcriture + MARGE_PROMPT + LlmRuntime.MARGE_CONTEXTE
+        val arrondi = ((besoin + 511) / 512) * 512
+        return min(settings.tailleContexte, arrondi).coerceAtLeast(2048)
     }
 
     /**
@@ -425,12 +576,15 @@ class Orchestrator(
     ): ProfileDigest {
         val contexte = runtime.currentModel?.contextSize ?: settings.tailleContexte
 
+        val reserveAppelUnique = runtime.estimateTokens(Prompts.candidatureSystem) +
+            runtime.estimateTokens(offre) + MAX_APPEL_UNIQUE
         val reserveAnalyse = runtime.estimateTokens(Prompts.preparationSystem) +
             runtime.estimateTokens(offre) + MAX_PREPARATION
         val reserveRedaction = runtime.estimateTokens(Prompts.redactionSystem) +
             TOKENS_RESUME_ETAPE1 + MAX_REDACTION
-        val budget = contexte - max(reserveAnalyse, reserveRedaction) -
-            LlmRuntime.MARGE_CONTEXTE - MARGE_PROMPT
+        val reserve = if (settings.analyseApprofondie) max(reserveAnalyse, reserveRedaction)
+        else reserveAppelUnique
+        val budget = contexte - reserve - LlmRuntime.MARGE_CONTEXTE - MARGE_PROMPT
 
         val complet = ProfileSerializer.digest(profile)
         if (budget > 0 && runtime.tokenCount(complet.texte) <= budget) return complet
@@ -460,11 +614,32 @@ class Orchestrator(
         return coupe
     }
 
-    private fun langueSortie(settings: Settings, analyse: JobAnalysis): String =
+    private fun langueSortieDepuisAnalyse(settings: Settings, analyse: JobAnalysis): String =
         when (settings.langueSortie) {
             LangueSortie.FR -> "fr"
             LangueSortie.EN -> "en"
             LangueSortie.AUTO -> analyse.langue.lowercase().take(2).ifBlank { "fr" }
+        }
+
+    /**
+     * Langue de sortie decidee avant d'ecrire.
+     *
+     * En un seul appel, la langue detectee par le modele arriverait trop tard :
+     * elle sort en meme temps que le CV, pas avant. On tranche donc sur
+     * l'annonce elle-meme, en comptant des mots outils que le francais n'a pas.
+     * C'est grossier, mais une annonce est assez longue pour que ce soit sur, et
+     * l'utilisateur peut toujours imposer la langue dans les reglages.
+     */
+    private fun langueSortie(settings: Settings, offre: String): String =
+        when (settings.langueSortie) {
+            LangueSortie.FR -> "fr"
+            LangueSortie.EN -> "en"
+            LangueSortie.AUTO -> {
+                val mots = offre.lowercase().split(Regex("[^a-z]+"))
+                val anglais = mots.count { it in MOTS_ANGLAIS }
+                val francais = mots.count { it in MOTS_FRANCAIS }
+                if (anglais > francais) "en" else "fr"
+            }
         }
 
     /** Retraduit les etiquettes E1/E2 en identifiants reels d'experiences. */
@@ -622,6 +797,11 @@ class Orchestrator(
         // La generation s'arrete de toute facon des que l'objet JSON se
         // referme : ces plafonds ne servent qu'aux reponses qui derapent.
         // ---------------------------------------------------------------
+        /**
+         * Appel unique : une courte analyse (200), un angle (120), le CV (700)
+         * et la lettre (550), plus la structure JSON.
+         */
+        const val MAX_APPEL_UNIQUE = 2000
         const val MAX_PREPARATION = 1200
         const val MAX_REDACTION = 1800
         const val MAX_RELECTURE = 1000
@@ -637,5 +817,16 @@ class Orchestrator(
 
         /** Au-dela, une annonce collee contient surtout la page du site. */
         const val MAX_OFFRE = 1600
+
+        // Mots outils tres frequents, et absents de l'autre langue. Ils suffisent
+        // a trancher sur un texte de la longueur d'une annonce.
+        val MOTS_ANGLAIS = setOf(
+            "the", "and", "with", "for", "you", "your", "will", "our", "we", "are",
+            "have", "this", "that", "from", "who", "team", "role", "skills",
+        )
+        val MOTS_FRANCAIS = setOf(
+            "le", "la", "les", "des", "vous", "nous", "votre", "notre", "et", "un",
+            "une", "pour", "avec", "dans", "sur", "poste", "profil", "equipe",
+        )
     }
 }

@@ -120,7 +120,10 @@ class MoteurCandidature(
                 debutRedactionMs = 0L,
             )
 
-            is PipelineEvent.Modele -> _etat.value = _etat.value.copy(modeleActuel = evenement.nom)
+            is PipelineEvent.Modele -> _etat.value = _etat.value.copy(
+                modeleActuel = evenement.nom,
+                modeleDetail = evenement.detail.ifBlank { _etat.value.modeleDetail },
+            )
 
             is PipelineEvent.Lecture -> _etat.value = _etat.value.copy(
                 phase = PhaseGeneration.LECTURE,

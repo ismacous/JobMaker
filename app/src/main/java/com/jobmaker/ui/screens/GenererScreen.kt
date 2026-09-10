@@ -200,9 +200,10 @@ fun GenererScreen(
                     Text("  Generer mon CV et ma lettre")
                 }
                 Text(
-                    "Tout se passe sur le telephone : comptez 2 a 10 minutes selon le modele " +
-                        "choisi. Vous pouvez quitter l'application, la generation continue et " +
-                        "vous previent quand c'est pret.",
+                    "Tout se passe sur le telephone, et un telephone ecrit lentement : " +
+                        "comptez une dizaine de minutes. Vous pouvez quitter l'application, " +
+                        "la generation continue et vous previent quand c'est pret. Le bilan " +
+                        "affiche a la fin dit ou le temps est passe.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),

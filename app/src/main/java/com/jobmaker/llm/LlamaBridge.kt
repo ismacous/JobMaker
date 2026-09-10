@@ -36,6 +36,7 @@ internal object LlamaBridge {
         path: String,
         nCtx: Int,
         nThreads: Int,
+        nThreadsBatch: Int,
         nGpuLayers: Int,
         useMmap: Boolean,
     ): Long
@@ -79,8 +80,13 @@ internal object LlamaBridge {
 
     external fun nativeEndGenerate(handle: Long)
 
-    /** Change le nombre de threads sans recharger le modele. */
-    external fun nativeSetThreads(handle: Long, nThreads: Int)
+    /**
+     * Change le nombre de threads sans recharger le modele.
+     *
+     * @param nThreads pour l'ecriture des tokens, limitee par la memoire.
+     * @param nThreadsBatch pour la lecture du prompt, limitee par le calcul.
+     */
+    external fun nativeSetThreads(handle: Long, nThreads: Int, nThreadsBatch: Int)
 
     /**
      * Lit un prompt synthetique par lots de [nLot], puis ecrit des tokens, en

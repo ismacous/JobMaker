@@ -388,6 +388,144 @@ Analyse l'annonce, puis etablis la strategie de candidature.
 """.trimIndent()
 
     // -----------------------------------------------------------------------
+    // Appel unique : annonce + profil -> analyse, angle, CV et lettre
+    //
+    // Tout tient dans une reponse. Le decoupage en deux appels faisait relire
+    // les consignes, l'annonce et le profil une seconde fois, et obligeait le
+    // modele a mettre par ecrit une analyse complete dont le seul lecteur etait
+    // l'appel suivant. Ici l'analyse reste, mais reduite a ce qui sert
+    // vraiment, et elle est lue par le modele lui-meme, dans la meme reponse.
+    // -----------------------------------------------------------------------
+
+    val candidatureSystem = """
+Tu produis, en une seule reponse et dans cet ordre, l'analyse d'une annonce,
+l'angle de la candidature, le CV et la lettre de motivation.
+
+1. ANALYSE DE L'ANNONCE
+- Distingue les exigences reelles (repetees, chiffrees, en tete) des souhaits.
+- Extrais les mots-cles techniques LITTERALEMENT comme ils sont ecrits : les
+  logiciels de tri de CV cherchent la chaine exacte.
+- Reconnais les formules codees du marche francais : "esprit d'equipe" = open
+  space ou brigade ; "polyvalent" = plusieurs metiers a la fois ; "dynamique" =
+  rythme soutenu ; "start-up" = peu de process, autonomie exigee.
+- Annonce tres courte : complete avec ce que ce metier implique habituellement
+  en France et mets "annonceIncomplete" a true. N'invente rien sur l'entreprise.
+
+2. ANGLE DE LA CANDIDATURE
+- Retiens les experiences pertinentes pour CETTE annonce, pas les plus prestigieuses.
+- Une experience sans rapport apparent a souvent une competence transferable
+  (gestion de la pression, contact client, rigueur, cadence) : nomme-la.
+- Ton adapte au secteur : sobre pour le public et la banque, direct pour
+  l'industrie et la logistique, chaleureux pour le commerce et le soin.
+
+3. LE CV
+a. Le titre reprend l'intitule du poste en gardant les mots de l'annonce.
+b. L'accroche fait 2 a 4 lignes : profil, niveau, deux competences qui collent a
+   l'annonce, et ce que le candidat cherche. Pas de "je", pas de "dynamique et motive".
+c. Chaque puce : VERBE D'ACTION + ce qui etait fait + resultat ou volume quand le
+   profil en donne un. Gerer, encadrer, reduire, mettre en place, assurer,
+   optimiser, former, negocier, controler, livrer.
+d. 3 a 5 puces pour les experiences pertinentes, 1 a 2 pour les autres. Jamais
+   plus de deux lignes par puce.
+e. Replace les mots-cles de l'annonce LITTERALEMENT, mais seulement ceux que le
+   profil justifie vraiment.
+f. Ordre antichronologique. Les periodes gardent le format du profil, tu ne
+   modifies aucune date.
+g. Pas de premiere personne, pas de superlatifs, pas de phrases d'ambiance.
+
+4. LA LETTRE - quatre paragraphes, 250 a 330 mots au total :
+a. VOUS - le besoin de l'entreprise tel qu'il ressort de l'annonce. Jamais
+   "Je me permets de vous adresser ma candidature" : cette phrase fait fermer la lettre.
+b. MOI - une preuve, tiree du parcours, que le candidat sait faire ce qui est
+   demande. Une experience precise, pas une liste de qualites.
+c. NOUS - ce que le candidat apportera concretement dans les premiers mois.
+d. CONCLUSION - disponibilite et proposition d'echange. Une phrase.
+Jamais de formule toute faite ("vivement interesse", "grande motivation", "votre
+prestigieuse entreprise"). Pas de repetition du CV : la lettre ajoute le pourquoi.
+Si l'entreprise n'est pas nommee dans l'annonce, ecris sans jamais la nommer.
+$REGLE_VERITE
+$REGLES_JSON
+
+NE FONT PAS PARTIE de ta reponse, l'application les inserant elle-meme depuis le
+profil pour qu'ils ne puissent pas etre alteres : le nom, le telephone, l'adresse,
+l'email, ET LES FORMATIONS ET DIPLOMES. N'ecris aucun diplome nulle part.
+
+Schema exact a produire. Les listes de l'analyse font au plus six entrees : elles
+te servent a viser juste, pas a etre exhaustif.
+{
+  "analyse": {
+    "poste": "intitule du poste",
+    "entreprise": "nom de l'entreprise ou \"\" si absent",
+    "lieu": "ville ou region",
+    "contrat": "CDI / CDD / interim / alternance / stage / freelance / non precise",
+    "secteur": "secteur d'activite",
+    "seniorite": "debutant / junior / confirme / senior",
+    "langue": "fr ou en",
+    "missions": ["mission attendue"],
+    "competencesRequises": ["competence indispensable"],
+    "motsClesAts": ["terme a replacer mot pour mot dans le CV"],
+    "annonceIncomplete": false
+  },
+  "strategie": {
+    "angle": "en une phrase, l'histoire que raconte cette candidature",
+    "titreCvSuggere": "titre a afficher en haut du CV",
+    "ton": "sobre / direct / chaleureux / technique",
+    "motsClesAPlacer": ["mot-cle de l'annonce que le profil justifie reellement"],
+    "ecarts": [{"ecart": "exigence non couverte", "reponse": "comment y repondre sans mentir"}]
+  },
+  "cv": {
+    "langue": "fr",
+    "titre": "titre du CV",
+    "accroche": "2 a 4 lignes de presentation",
+    "experiences": [
+      {
+        "poste": "intitule",
+        "entreprise": "nom",
+        "lieu": "ville",
+        "periode": "reprise telle quelle du profil",
+        "puces": ["puce 1", "puce 2"]
+      }
+    ],
+    "competences": [{"categorie": "nom du groupe", "items": ["competence"]}],
+    "centresInteret": ["a ne remplir que si c'est un atout pour ce poste"]
+  },
+  "lettre": {
+    "langue": "fr",
+    "objet": "Candidature au poste de ...",
+    "destinataire": "Service recrutement de X, ou \"\" si inconnu",
+    "salutation": "Madame, Monsieur,",
+    "paragraphes": ["paragraphe 1", "paragraphe 2", "paragraphe 3", "paragraphe 4"],
+    "formulePolitesse": "formule de politesse complete et sobre",
+    "signature": "Prenom Nom"
+  }
+}
+""".trimIndent()
+
+    fun candidatureUser(
+        offre: String,
+        profil: String,
+        nomComplet: String,
+        langue: String,
+        disponibilite: String,
+        unePage: Boolean,
+    ) = """
+--- ANNONCE ---
+${offre.trim()}
+--- FIN DE L'ANNONCE ---
+
+--- PROFIL DU CANDIDAT (seule source de faits) ---
+$profil
+--- FIN DU PROFIL ---
+
+Signature a utiliser : $nomComplet
+${if (disponibilite.isNotBlank()) "Disponibilite declaree : $disponibilite" else ""}
+
+Analyse l'annonce, choisis l'angle, puis redige le CV et la lettre en ${langueLabel(langue)}.
+${if (unePage) "Contrainte : le CV doit tenir sur UNE page. Sois selectif." else ""}
+Les deux champs "langue" de ta reponse doivent valoir "$langue".
+""".trimIndent()
+
+    // -----------------------------------------------------------------------
     // Etape 2 fusionnee : CV ET lettre
     // -----------------------------------------------------------------------
 

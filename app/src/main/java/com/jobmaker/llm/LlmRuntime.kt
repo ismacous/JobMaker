@@ -55,6 +55,8 @@ data class TraceAppel(
     val msEcriture: Long,
     val maxTokens: Int,
     val raison: RaisonArret,
+    /** Ce que le noyau dit avoir fait pendant cet appel. */
+    val compteurs: CompteursSysteme = CompteursSysteme(0, 0, 0, 0),
 ) {
     val lectureParSeconde: Double
         get() = tokensPrompt * 1000.0 / msPrompt.coerceAtLeast(1)
@@ -62,10 +64,32 @@ data class TraceAppel(
         get() = tokensEcrits * 1000.0 / msEcriture.coerceAtLeast(1)
     val totalMs: Long get() = msPrompt + msEcriture
 
+    /**
+     * Nombre moyen de coeurs reellement occupes pendant l'appel.
+     *
+     * C'est la mesure qui separe les deux lenteurs possibles. Proche du nombre
+     * de threads : le telephone calcule, il est simplement a sa vitesse. Bien
+     * en dessous : il attend -- la memoire, ou le stockage.
+     */
+    val coeursOccupes: Double
+        get() = compteurs.msProcesseur.toDouble() / totalMs.coerceAtLeast(1)
+
     fun ligne(): String = ("%-22s lecture %5d tok en %6s (%5.1f tok/s) | " +
         "ecriture %5d/%d tok en %6s (%5.1f tok/s) | %s").format(
         etape.take(22), tokensPrompt, duree(msPrompt), lectureParSeconde,
         tokensEcrits, maxTokens, duree(msEcriture), ecritureParSeconde, raison.libelle,
+    )
+
+    /**
+     * Seconde ligne : ce que faisait la machine. Les defauts majeurs comptent
+     * les pages qu'il a fallu aller relire sur le stockage -- un modele mappe
+     * puis evince par Android se voit la, et nulle part ailleurs.
+     */
+    fun ligneMachine(): String = ("%-22s coeurs occupes %5.2f | defauts majeurs %7d | " +
+        "lu sur stockage %s").format(
+        "", coeursOccupes, compteurs.defautsMajeurs,
+        if (compteurs.octetsLus < 0) "non mesurable"
+        else "%.0f Mo".format(compteurs.octetsLus / 1e6),
     )
 
     private fun duree(ms: Long): String =
@@ -130,7 +154,7 @@ class LlmRuntime(
                 )
             }
             val h = LlamaBridge.nativeLoad(
-                filePath, contextSize, threads, gpuLayers,
+                filePath, contextSize, threadsEcriture(threads), threads, gpuLayers,
                 /* useMmap = */ !chargerEnMemoire,
             )
             if (h == 0L) {
@@ -195,7 +219,7 @@ class LlmRuntime(
         val h = handle
         if (h == 0L) throw LlmException("Aucun modele charge.")
         withContext(dispatcher) {
-            LlamaBridge.nativeSetThreads(h, nThreads)
+            LlamaBridge.nativeSetThreads(h, nThreads, nThreads)
             val avant = CompteursSysteme.lire()
             val r = LlamaBridge.nativeBench(h, nPrompt, nGen, nLot)
             val apres = CompteursSysteme.lire()
@@ -292,6 +316,7 @@ class LlmRuntime(
             val prompt = renderPrompt(h, messages)
             val seed = if (params.seed >= 0) params.seed else (System.nanoTime() and 0x7FFFFFFF).toInt()
 
+            val compteursAvant = CompteursSysteme.lire()
             val debutLecture = System.currentTimeMillis()
             val rc = LlamaBridge.nativeBeginGenerate(
                 h, prompt, params.maxTokens, params.temperature, params.topP,
@@ -398,8 +423,10 @@ class LlmRuntime(
                 msEcriture = dureeRedaction,
                 maxTokens = params.maxTokens,
                 raison = raison,
+                compteurs = CompteursSysteme.lire() - compteursAvant,
             )
             Log.i(TAG, trace.ligne())
+            Log.i(TAG, trace.ligneMachine())
             onTrace?.invoke(trace)
             trimStopSequences(sb.toString(), params.stopSequences)
         }
@@ -472,5 +499,18 @@ class LlmRuntime(
             val cores = Runtime.getRuntime().availableProcessors()
             return max(2, min(6, cores - 2))
         }
+
+        /**
+         * Threads pour l'ecriture des tokens, deduits de ceux de la lecture.
+         *
+         * Ecrire un token oblige a relire tout le modele en memoire : le debit
+         * plafonne sur la bande passante, pas sur le calcul. Mesure sur un
+         * Snapdragon 8 Elite avec Qwen3 4B Q4 : 12,03 tok/s a quatre threads,
+         * 12,01 a six. Les deux threads supplementaires ne produisent rien --
+         * ils chauffent le telephone, qui se bride ensuite, et la vitesse
+         * s'effondre au fil des minutes. La lecture du prompt, elle, calcule
+         * vraiment et garde tous les threads.
+         */
+        fun threadsEcriture(threadsLecture: Int): Int = max(2, threadsLecture - 2)
     }
 }

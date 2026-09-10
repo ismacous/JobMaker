@@ -43,6 +43,16 @@ data class Settings(
      * demande sur une candidature deja produite.
      */
     val relectureActive: Boolean = false,
+    /**
+     * Etudier l'annonce dans un appel separe avant de rediger.
+     *
+     * Desactive par defaut. Le detail supplementaire est reel -- souhaits,
+     * outils, attentes implicites, ecarts et reponses, experiences classees une
+     * a une -- mais il se paie d'une seconde lecture entiere des consignes, de
+     * l'annonce et du profil, et d'un millier de tokens ecrits pour le seul
+     * usage de l'appel suivant. Mesure sur un S25 Ultra : cela double le temps.
+     */
+    val analyseApprofondie: Boolean = false,
     val passesCorrection: Int = 1,
     val langueSortie: LangueSortie = LangueSortie.AUTO,
     val cvUnePage: Boolean = true,
@@ -69,6 +79,7 @@ class SettingsRepository(private val context: Context) {
             couleurAccent = this[KEY_COULEUR] ?: "#1F4E79",
             photoSurCv = this[KEY_PHOTO] ?: false,
             relectureActive = this[KEY_RELECTURE] ?: false,
+            analyseApprofondie = this[KEY_APPROFONDIE] ?: false,
             passesCorrection = this[KEY_PASSES] ?: 1,
             langueSortie = runCatching {
                 LangueSortie.valueOf(this[KEY_LANGUE] ?: LangueSortie.AUTO.name)
@@ -95,6 +106,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setCouleurAccent(value: String) = context.dataStore.edit { it[KEY_COULEUR] = value }
     suspend fun setPhotoSurCv(value: Boolean) = context.dataStore.edit { it[KEY_PHOTO] = value }
     suspend fun setRelectureActive(value: Boolean) = context.dataStore.edit { it[KEY_RELECTURE] = value }
+    suspend fun setAnalyseApprofondie(value: Boolean) =
+        context.dataStore.edit { it[KEY_APPROFONDIE] = value }
     suspend fun setPassesCorrection(value: Int) = context.dataStore.edit { it[KEY_PASSES] = value }
     suspend fun setLangueSortie(value: LangueSortie) =
         context.dataStore.edit { it[KEY_LANGUE] = value.name }
@@ -110,6 +123,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_COULEUR = stringPreferencesKey("couleur_accent")
         val KEY_PHOTO = booleanPreferencesKey("photo_cv")
         val KEY_RELECTURE = booleanPreferencesKey("relecture")
+        val KEY_APPROFONDIE = booleanPreferencesKey("analyse_approfondie")
         val KEY_PASSES = intPreferencesKey("passes_correction")
         val KEY_LANGUE = stringPreferencesKey("langue_sortie")
         val KEY_UNE_PAGE = booleanPreferencesKey("cv_une_page")

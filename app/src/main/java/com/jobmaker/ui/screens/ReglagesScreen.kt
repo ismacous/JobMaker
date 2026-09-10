@@ -129,6 +129,18 @@ fun ReglagesScreen(
             // -----------------------------------------------------------------
             SectionCarte("Qualite de la generation") {
                 LigneInterrupteur(
+                    titre = "Analyse approfondie de l'annonce",
+                    detail = "L'annonce est etudiee dans une etape separee avant la redaction : " +
+                        "souhaits, outils, attentes implicites, ecarts et reponses, experiences " +
+                        "classees une a une. C'est ce detail qui remplit l'onglet " +
+                        "\"Offre analysee\". Il se paie d'une seconde lecture complete de " +
+                        "l'annonce et de votre profil, et d'un millier de mots ecrits que vous " +
+                        "ne lirez pas : comptez le double de temps.",
+                    valeur = reglages.analyseApprofondie,
+                    onChange = vm::setAnalyseApprofondie,
+                )
+
+                LigneInterrupteur(
                     titre = "Relecture automatique",
                     detail = "Deux etapes supplementaires relisent le CV et la lettre, puis " +
                         "les reecrivent. Elles doublent le temps de generation. Desactivees " +
