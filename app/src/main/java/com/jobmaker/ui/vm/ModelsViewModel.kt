@@ -161,6 +161,130 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    private fun ligneMesure(m: com.jobmaker.llm.LlmRuntime.Mesure): String =
+        "%d thread%s : lecture %.1f tok/s | ecriture %.2f tok/s".format(
+            m.nThreads, if (m.nThreads > 1) "s" else "",
+            m.lectureParSeconde, m.ecritureParSeconde,
+        )
+
+    private fun ligneCompteurs(m: com.jobmaker.llm.LlmRuntime.Mesure): String =
+        "   coeurs occupes %.2f | defauts majeurs %d | lu sur stockage %s".format(
+            m.coeursOccupes,
+            m.compteurs.defautsMajeurs,
+            if (m.compteurs.octetsLus < 0) "non mesurable"
+            else "%.0f Mo".format(m.compteurs.octetsLus / 1e6),
+        )
+
+    /**
+     * Mesure sur l'appareil ce que fait reellement le moteur.
+     *
+     * Chronometre separement la lecture d'un prompt et l'ecriture de tokens, a
+     * plusieurs nombres de threads, en relevant a chaque fois le temps
+     * processeur consomme, les defauts de page majeurs et les octets lus sur le
+     * stockage. Le resultat dit lequel des deux problemes on a : le telephone
+     * calcule trop lentement, ou il passe son temps a relire le modele.
+     */
+    fun diagnostiquer(modelId: String) {
+        if (_testEnCours.value) return
+        _testEnCours.value = true
+        _resultatTest.value = "Mesure en cours. Comptez quelques minutes : six passages, " +
+            "dont un a froid. Restez sur cet ecran."
+        viewModelScope.launch {
+            runCatching {
+                val fichier = container.modelManager.installedFile(modelId)
+                    ?: error("Fichier introuvable.")
+                val entree = container.modelManager.catalog.byId(modelId)
+                val r = reglages.value
+                val coeurs = Runtime.getRuntime().availableProcessors()
+
+                val debutChargement = System.currentTimeMillis()
+                val info = container.llmRuntime.ensureLoaded(
+                    modelId = modelId,
+                    filePath = fichier.absolutePath,
+                    contextSize = minOf(
+                        r.tailleContexte,
+                        entree?.contextMax ?: r.tailleContexte,
+                    ),
+                    threads = r.threads,
+                    gpuLayers = r.couchesGpu,
+                    chargerEnMemoire = r.chargerEnMemoire,
+                )
+                val msChargement = System.currentTimeMillis() - debutChargement
+                val infoMoteur = container.llmRuntime.systemInfo()
+
+                // Volontairement court : aux vitesses constatees, 128 tokens par
+                // passe demanderaient une heure de mesure.
+                val tokensPrompt = 32
+                val tokensEcrits = 4
+
+                // Premier passage : il paie le chargement des pages du modele
+                // depuis le stockage. L'ecart avec les suivants mesure
+                // exactement le cout du mmap.
+                val chauffe = container.llmRuntime.mesurer(
+                    nPrompt = tokensPrompt, nGen = tokensEcrits, nThreads = r.threads,
+                )
+
+                // De 1 a tous les coeurs : si la vitesse ne monte pas avec les
+                // threads, le probleme n'est pas la puissance de calcul.
+                val essais = listOf(1, 2, 4, 6, 8).filter { it <= coeurs }.distinct()
+                val mesures = essais.map { n ->
+                    container.llmRuntime.mesurer(
+                        nPrompt = tokensPrompt, nGen = tokensEcrits, nThreads = n,
+                    )
+                }
+
+                buildString {
+                    appendLine("MODELE")
+                    appendLine(info.description)
+                    appendLine("Fichier : %.2f Go".format(fichier.length() / 1e9))
+                    appendLine(
+                        "Poids : " +
+                            (if (info.enMemoire) "copies en memoire"
+                            else "mappes depuis le fichier")
+                    )
+                    appendLine("Ouverture : ${msChargement / 1000.0} s")
+                    appendLine()
+                    appendLine("APPAREIL")
+                    appendLine("Coeurs vus par l'application : $coeurs")
+                    appendLine("Contexte : ${info.contextSize} tokens")
+                    appendLine()
+                    appendLine("PREMIER PASSAGE (pages du modele encore a lire)")
+                    appendLine(ligneMesure(chauffe))
+                    appendLine(ligneCompteurs(chauffe))
+                    appendLine()
+                    appendLine("MESURES A CHAUD ($tokensPrompt tokens lus, $tokensEcrits ecrits)")
+                    mesures.forEach { m ->
+                        appendLine(ligneMesure(m))
+                        appendLine(ligneCompteurs(m))
+                    }
+                    appendLine()
+                    appendLine("LECTURE DU RESULTAT")
+                    val meilleure = mesures.maxByOrNull { it.ecritureParSeconde }
+                    if (meilleure != null) {
+                        appendLine(
+                            if (meilleure.coeursOccupes < 1.0)
+                                "Les coeurs occupes sont sous 1 : le moteur attend la memoire " +
+                                    "ou le stockage, il ne calcule pas."
+                            else if (meilleure.coeursOccupes < meilleure.nThreads * 0.6)
+                                "Les threads ne travaillent qu'a temps partiel : contention " +
+                                    "ou attente memoire."
+                            else
+                                "Les coeurs sont pleinement occupes : la lenteur vient bien du " +
+                                    "calcul, pas d'une attente."
+                        )
+                        appendLine("Meilleur reglage mesure : ${meilleure.nThreads} threads.")
+                    }
+                    appendLine()
+                    appendLine("MOTEUR")
+                    append(infoMoteur)
+                }
+            }.onSuccess { _resultatTest.value = it }
+                .onFailure { _resultatTest.value = "Echec : ${it.message}" }
+            container.llmRuntime.unload()
+            _testEnCours.value = false
+        }
+    }
+
     suspend fun infoMoteur(): String = container.llmRuntime.systemInfo()
 
     companion object {

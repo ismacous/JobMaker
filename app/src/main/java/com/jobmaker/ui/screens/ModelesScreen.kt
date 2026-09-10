@@ -46,6 +46,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.jobmaker.llm.CatalogModel
@@ -155,6 +157,17 @@ fun ModelesScreen(vm: ModelsViewModel, onRetour: () -> Unit) {
                                     }
                                     Text(if (testEnCours) "  Test..." else "Tester")
                                 }
+                                OutlinedButton(
+                                    onClick = { vm.diagnostiquer(modele.id) },
+                                    enabled = !testEnCours,
+                                ) {
+                                    Text("Mesurer")
+                                }
+                            }
+                            Row(
+                                Modifier.padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
                                 OutlinedButton(onClick = { vm.definirPourTousLesRoles(modele.id) }) {
                                     Text("Tout utiliser")
                                 }
@@ -298,11 +311,23 @@ fun ModelesScreen(vm: ModelsViewModel, onRetour: () -> Unit) {
     }
 
     resultatTest?.let { resultat ->
+        val presse = LocalClipboardManager.current
         AlertDialog(
             onDismissRequest = vm::effacerTest,
             title = { Text("Test du modele") },
-            text = { Text(resultat, style = MaterialTheme.typography.bodySmall) },
+            text = {
+                // Le diagnostic fait une vingtaine de lignes : sans defilement,
+                // la fin est coupee et c'est justement la qu'est la conclusion.
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(resultat, style = MaterialTheme.typography.bodySmall)
+                }
+            },
             confirmButton = { TextButton(onClick = vm::effacerTest) { Text("Fermer") } },
+            dismissButton = {
+                TextButton(onClick = { presse.setText(AnnotatedString(resultat)) }) {
+                    Text("Copier")
+                }
+            },
         )
     }
 

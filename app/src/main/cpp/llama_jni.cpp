@@ -465,6 +465,88 @@ Java_com_jobmaker_llm_LlamaBridge_nativeEndGenerate(JNIEnv* /*env*/, jobject /*t
     clear_kv(s);
 }
 
+// ---------------------------------------------------------------------------
+// Mesure
+//
+// On ne peut pas diagnostiquer une lenteur en la devinant : ces deux fonctions
+// existent pour mesurer sur l'appareil, separement, la lecture d'un prompt
+// (calcul par lots, limite par la puissance de calcul) et l'ecriture de tokens
+// (limite par la bande passante memoire). Cote Kotlin, on encadre l'appel par
+// la lecture de /proc/self/stat : si le temps processeur consomme est tres
+// inferieur au temps ecoule, le moteur attend la memoire ; s'il en est un
+// multiple, il calcule vraiment.
+// ---------------------------------------------------------------------------
+
+JNI_FN(void)
+Java_com_jobmaker_llm_LlamaBridge_nativeSetThreads(JNIEnv* /*env*/, jobject /*thiz*/,
+                                                   jlong handle, jint n_threads) {
+    Session* s = as_session(handle);
+    if (s == nullptr) return;
+    std::lock_guard<std::mutex> lock(s->mu);
+    llama_set_n_threads(s->ctx, n_threads, n_threads);
+}
+
+/**
+ * Lit un prompt synthetique de n_prompt tokens puis ecrit n_gen tokens.
+ *
+ * Retourne {ms de lecture, ms d'ecriture, tokens lus, tokens ecrits}, ou un
+ * tableau vide en cas d'echec. N'utilise pas l'etat de generation courant :
+ * le cache KV est vide avant et apres.
+ */
+JNI_FN(jlongArray)
+Java_com_jobmaker_llm_LlamaBridge_nativeBench(JNIEnv* env, jobject /*thiz*/,
+                                              jlong handle, jint n_prompt, jint n_gen) {
+    Session* s = as_session(handle);
+    if (s == nullptr) return env->NewLongArray(0);
+    std::lock_guard<std::mutex> lock(s->mu);
+
+    // Un texte quelconque pour obtenir des identifiants de tokens valides, que
+    // l'on repete ensuite en boucle jusqu'a la longueur demandee.
+    std::vector<llama_token> graine =
+        tokenize(s->vocab, "Le candidat recherche un poste stable dans la logistique. ", false);
+    if (graine.empty()) return env->NewLongArray(0);
+
+    const int voulu = std::max(1, std::min<int>(n_prompt, s->n_ctx - n_gen - 8));
+    std::vector<llama_token> tokens(voulu);
+    for (int i = 0; i < voulu; ++i) tokens[i] = graine[i % graine.size()];
+
+    clear_kv(s);
+    build_sampler(s, /*temp=*/0.0f, 1.0f, 0, 1.0f, 64, 0);
+
+    jlong out[4] = {0, 0, 0, 0};
+
+    const int64_t t0 = llama_time_us();
+    int lus = 0;
+    while (lus < voulu) {
+        const int n = std::min(kLotPrompt, voulu - lus);
+        llama_batch batch = llama_batch_get_one(tokens.data() + lus, n);
+        if (llama_decode(s->ctx, batch) != 0) { clear_kv(s); return env->NewLongArray(0); }
+        lus += n;
+    }
+    const int64_t t1 = llama_time_us();
+
+    int ecrits = 0;
+    while (ecrits < n_gen) {
+        llama_token tok = llama_sampler_sample(s->sampler, s->ctx, -1);
+        llama_batch batch = llama_batch_get_one(&tok, 1);
+        if (llama_decode(s->ctx, batch) != 0) break;
+        ++ecrits;
+    }
+    const int64_t t2 = llama_time_us();
+
+    clear_kv(s);
+    s->generating = false;
+
+    out[0] = static_cast<jlong>((t1 - t0) / 1000);
+    out[1] = static_cast<jlong>((t2 - t1) / 1000);
+    out[2] = lus;
+    out[3] = ecrits;
+
+    jlongArray arr = env->NewLongArray(4);
+    if (arr != nullptr) env->SetLongArrayRegion(arr, 0, 4, out);
+    return arr;
+}
+
 JNI_FN(jstring)
 Java_com_jobmaker_llm_LlamaBridge_nativeSystemInfo(JNIEnv* env, jobject /*thiz*/) {
     ensure_backend();

@@ -105,6 +105,56 @@ class LlmRuntime(
         }
     }
 
+    /**
+     * Resultat d'une mesure : les deux phases chronometrees separement, avec ce
+     * que le noyau dit avoir fait pendant ce temps.
+     */
+    data class Mesure(
+        val nThreads: Int,
+        val msLecture: Long,
+        val msEcriture: Long,
+        val tokensLus: Int,
+        val tokensEcrits: Int,
+        val compteurs: CompteursSysteme,
+    ) {
+        val lectureParSeconde: Double
+            get() = tokensLus * 1000.0 / msLecture.coerceAtLeast(1)
+        val ecritureParSeconde: Double
+            get() = tokensEcrits * 1000.0 / msEcriture.coerceAtLeast(1)
+
+        /**
+         * Nombre moyen de coeurs reellement occupes. Proche du nombre de
+         * threads = le telephone calcule. Bien en dessous de 1 = il attend.
+         */
+        val coeursOccupes: Double
+            get() = compteurs.msProcesseur.toDouble() /
+                (msLecture + msEcriture).coerceAtLeast(1)
+    }
+
+    /**
+     * Mesure la lecture d'un prompt de [nPrompt] tokens puis l'ecriture de
+     * [nGen] tokens, avec [nThreads] threads. Le modele doit deja etre charge.
+     */
+    suspend fun mesurer(nPrompt: Int, nGen: Int, nThreads: Int): Mesure = mutex.withLock {
+        val h = handle
+        if (h == 0L) throw LlmException("Aucun modele charge.")
+        withContext(dispatcher) {
+            LlamaBridge.nativeSetThreads(h, nThreads)
+            val avant = CompteursSysteme.lire()
+            val r = LlamaBridge.nativeBench(h, nPrompt, nGen)
+            val apres = CompteursSysteme.lire()
+            if (r.size < 4) throw LlmException("La mesure a echoue (decode impossible).")
+            Mesure(
+                nThreads = nThreads,
+                msLecture = r[0],
+                msEcriture = r[1],
+                tokensLus = r[2].toInt(),
+                tokensEcrits = r[3].toInt(),
+                compteurs = apres - avant,
+            )
+        }
+    }
+
     suspend fun unload() = mutex.withLock {
         withContext(dispatcher) { freeLocked() }
     }
