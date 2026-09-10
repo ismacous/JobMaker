@@ -9,6 +9,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.math.max
 import kotlin.math.min
 
@@ -55,14 +56,21 @@ data class TraceAppel(
     val msEcriture: Long,
     val maxTokens: Int,
     val raison: RaisonArret,
+    /** Tokens du prompt repris du cache au lieu d'etre recalcules. */
+    val tokensReutilises: Int = 0,
+    /** Temps passe a relire et reecrire le fichier de cache. */
+    val msCache: Long = 0,
     /** Ce que le noyau dit avoir fait pendant cet appel. */
     val compteurs: CompteursSysteme = CompteursSysteme(0, 0, 0, 0),
 ) {
     val lectureParSeconde: Double
-        get() = tokensPrompt * 1000.0 / msPrompt.coerceAtLeast(1)
+        get() = tokensCalcules * 1000.0 / msPrompt.coerceAtLeast(1)
     val ecritureParSeconde: Double
         get() = tokensEcrits * 1000.0 / msEcriture.coerceAtLeast(1)
     val totalMs: Long get() = msPrompt + msEcriture
+
+    /** Tokens du prompt qu'il a vraiment fallu calculer. */
+    val tokensCalcules: Int get() = tokensPrompt - tokensReutilises
 
     /**
      * Nombre moyen de coeurs reellement occupes pendant l'appel.
@@ -76,9 +84,15 @@ data class TraceAppel(
 
     fun ligne(): String = ("%-22s lecture %5d tok en %6s (%5.1f tok/s) | " +
         "ecriture %5d/%d tok en %6s (%5.1f tok/s) | %s").format(
-        etape.take(22), tokensPrompt, duree(msPrompt), lectureParSeconde,
+        etape.take(22), tokensCalcules, duree(msPrompt), lectureParSeconde,
         tokensEcrits, maxTokens, duree(msEcriture), ecritureParSeconde, raison.libelle,
     )
+
+    /** Ce que le cache a evite. Vide quand il n'a rien servi. */
+    fun ligneCache(): String = if (tokensReutilises <= 0) "" else
+        "%-22s cache de prompt : %5d tokens repris sur %d, relus en %s".format(
+            "", tokensReutilises, tokensPrompt, duree(msCache),
+        )
 
     /**
      * Seconde ligne : ce que faisait la machine. Les defauts majeurs comptent
@@ -305,6 +319,7 @@ class LlmRuntime(
         messages: List<ChatMessage>,
         params: GenerationParams,
         etape: String = "",
+        cacheDePrompt: File? = null,
         onLecturePrompt: ((lus: Int, total: Int, dureeMs: Long) -> Unit)? = null,
         onToken: ((texte: String, tokens: Int) -> Unit)? = null,
         onTrace: ((TraceAppel) -> Unit)? = null,
@@ -335,11 +350,28 @@ class LlmRuntime(
                     else -> LlmException("Erreur du moteur d'inference (code $rc).")
                 }
             }
+            val totalPrompt = rc
+
+            // Ce qui a deja ete calcule une fois n'a pas a l'etre deux fois.
+            // Le prefixe commun avec le cache est retrouve par comparaison des
+            // tokens : rien a declarer, rien a invalider a la main.
+            var msCache = 0L
+            var reutilises = 0
+            if (cacheDePrompt != null && cacheDePrompt.isFile) {
+                val debut = System.currentTimeMillis()
+                reutilises = runCatching {
+                    LlamaBridge.nativeReutiliserCache(h, cacheDePrompt.absolutePath)
+                }.getOrElse {
+                    Log.w(TAG, "Cache de prompt illisible, on recalcule", it)
+                    0
+                }
+                msCache += System.currentTimeMillis() - debut
+            }
+
             // Lecture du prompt lot par lot : l'avancement remonte a l'interface
             // et l'annulation devient possible pendant cette phase.
-            val totalPrompt = rc
-            var lus = 0
-            onLecturePrompt?.invoke(0, totalPrompt, 0L)
+            var lus = reutilises
+            onLecturePrompt?.invoke(lus, totalPrompt, 0L)
             while (true) {
                 if (!currentCoroutineContext().isActive) {
                     LlamaBridge.nativeEndGenerate(h)
@@ -354,7 +386,22 @@ class LlmRuntime(
                 lus += n
                 onLecturePrompt?.invoke(lus, totalPrompt, System.currentTimeMillis() - debutLecture)
             }
-            val dureeLecture = System.currentTimeMillis() - debutLecture
+            val dureeLecture = System.currentTimeMillis() - debutLecture - msCache
+
+            // Le cache est reecrit quand il n'a pas beaucoup servi : premiere
+            // generation, profil modifie, consignes changees. Tant qu'il couvre
+            // l'essentiel du prompt, on ne reecrit pas un demi-gigaoctet pour
+            // gagner quelques tokens.
+            if (cacheDePrompt != null && reutilises < totalPrompt * SEUIL_REECRITURE_CACHE) {
+                val debut = System.currentTimeMillis()
+                runCatching {
+                    cacheDePrompt.parentFile?.mkdirs()
+                    if (!LlamaBridge.nativeSauverCache(h, cacheDePrompt.absolutePath)) {
+                        cacheDePrompt.delete()
+                    }
+                }.onFailure { Log.w(TAG, "Cache de prompt non ecrit", it) }
+                msCache += System.currentTimeMillis() - debut
+            }
 
             val sb = StringBuilder()
             val detecteur = if (params.arretJsonComplet) DetecteurJsonComplet() else null
@@ -423,9 +470,12 @@ class LlmRuntime(
                 msEcriture = dureeRedaction,
                 maxTokens = params.maxTokens,
                 raison = raison,
+                tokensReutilises = reutilises,
+                msCache = msCache,
                 compteurs = CompteursSysteme.lire() - compteursAvant,
             )
             Log.i(TAG, trace.ligne())
+            trace.ligneCache().takeIf { it.isNotBlank() }?.let { Log.i(TAG, it) }
             Log.i(TAG, trace.ligneMachine())
             onTrace?.invoke(trace)
             trimStopSequences(sb.toString(), params.stopSequences)
@@ -489,6 +539,15 @@ class LlmRuntime(
          * Huit rafraichissements par seconde suffisent a voir que ca ecrit.
          */
         private const val MS_ENTRE_ENVOIS = 120L
+
+        /**
+         * En deca de cette part du prompt reprise du cache, on le reecrit.
+         *
+         * Le fichier pese environ 144 Ko par token -- un demi-gigaoctet pour un
+         * prompt courant. Le reecrire quand il couvre deja les trois quarts du
+         * prompt userait le stockage pour rien.
+         */
+        private const val SEUIL_REECRITURE_CACHE = 0.6
 
         /**
          * Sur les SoC recents (8 Elite : 2 Oryon prime + 6 performance), aller

@@ -189,6 +189,13 @@ class Orchestrator(
         val (modele, noThink) = charger(AgentRole.WRITING, settings, contexte)
         emettre(PipelineEvent.Modele(modele, detailMoteur(settings)))
 
+        // Consignes et profil forment le debut du prompt et ne changent pas
+        // d'une candidature a l'autre : leur etat interne est relu sur le
+        // disque au lieu d'etre recalcule. Seule l'annonce reste a lire.
+        val cache = runtime.currentModel
+            ?.takeIf { settings.cachePrompt }
+            ?.let { modelManager.fichierCache(it.modelId, it.contextSize, VERSION_CACHE) }
+
         val dossier = runtime.generateJson(
             serializer = DossierComplet.serializer(),
             system = Prompts.candidatureSystem,
@@ -199,6 +206,7 @@ class Orchestrator(
             params = GenerationParams.writing(maxTokens = MAX_APPEL_UNIQUE),
             suppressReasoning = noThink,
             etape = "Candidature complete",
+            cacheDePrompt = cache,
             onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
             onToken = { texte, n -> emettre(PipelineEvent.Jeton(texte, n)) },
             onTrace = { emettre(PipelineEvent.Mesure(it)) },
@@ -798,10 +806,17 @@ class Orchestrator(
         // referme : ces plafonds ne servent qu'aux reponses qui derapent.
         // ---------------------------------------------------------------
         /**
-         * Appel unique : une courte analyse (200), un angle (120), le CV (700)
-         * et la lettre (550), plus la structure JSON.
+         * Appel unique : une courte analyse, un angle, le CV et la lettre, plus
+         * la structure JSON.
+         *
+         * Mesure sur une vraie annonce : 1988 tokens, douze de moins que le
+         * plafond precedent. La marge etait trop mince -- une annonce un peu
+         * plus riche aurait fait tronquer le CV. Ce plafond n'est plus l'arret
+         * normal depuis que la generation s'interrompt des que l'objet JSON se
+         * referme : il ne sert qu'aux reponses qui derapent, et le tenir serre
+         * ne fait plus gagner de temps, seulement perdre des candidatures.
          */
-        const val MAX_APPEL_UNIQUE = 2000
+        const val MAX_APPEL_UNIQUE = 2600
         const val MAX_PREPARATION = 1200
         const val MAX_REDACTION = 1800
         const val MAX_RELECTURE = 1000
@@ -817,6 +832,15 @@ class Orchestrator(
 
         /** Au-dela, une annonce collee contient surtout la page du site. */
         const val MAX_OFFRE = 1600
+
+        /**
+         * Version du prefixe mis en cache. A incrementer des que le prompt
+         * systeme ou la mise en forme du profil changent : les tokens ne
+         * correspondraient plus, et le cache serait relu pour rien avant d'etre
+         * reecrit. Le nom du fichier la porte, donc l'ancien est simplement
+         * ignore puis efface.
+         */
+        const val VERSION_CACHE = 1
 
         // Mots outils tres frequents, et absents de l'autre langue. Ils suffisent
         // a trancher sur un texte de la longueur d'une annonce.

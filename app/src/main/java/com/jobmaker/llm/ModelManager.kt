@@ -86,6 +86,31 @@ class ModelManager(private val context: Context) {
     val modelsDir: File
         get() = File(context.filesDir, "models").apply { if (!exists()) mkdirs() }
 
+    /**
+     * Fichier de cache d'un prompt, pour un modele et une fenetre donnes.
+     *
+     * Un seul cache est conserve : il pese quelques centaines de megaoctets, et
+     * changer de modele ou de fenetre le rend de toute facon inutilisable. Les
+     * autres sont effaces au passage.
+     */
+    fun fichierCache(modelId: String, contexte: Int, version: Int): File {
+        val dossier = File(context.filesDir, "cache_prompt").apply {
+            if (!exists()) mkdirs()
+        }
+        val voulu = File(dossier, "$modelId-c$contexte-v$version.kv")
+        dossier.listFiles()?.forEach { if (it != voulu && it.isFile) it.delete() }
+        return voulu
+    }
+
+    /** Taille totale des caches de prompt sur le disque. */
+    fun tailleCaches(): Long =
+        File(context.filesDir, "cache_prompt").listFiles()
+            ?.sumOf { it.length() } ?: 0L
+
+    fun viderCaches() {
+        File(context.filesDir, "cache_prompt").listFiles()?.forEach { it.delete() }
+    }
+
     init {
         refreshInstalled()
     }

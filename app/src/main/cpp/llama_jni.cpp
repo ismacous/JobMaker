@@ -148,6 +148,9 @@ std::string piece_of(const llama_vocab* vocab, llama_token token) {
     return big;
 }
 
+// En deca, relire le fichier de cache coute plus cher que recalculer.
+constexpr int kMinCache = 256;
+
 // Taille d'un lot de lecture du prompt. Doit rester <= n_batch du contexte.
 //
 // C'est aussi le grain de l'annulation : la lecture ne peut etre interrompue
@@ -523,6 +526,112 @@ Java_com_jobmaker_llm_LlamaBridge_nativeEndGenerate(JNIEnv* /*env*/, jobject /*t
     s->prompt.clear();
     s->prompt_lu = 0;
     clear_kv(s);
+}
+
+// ---------------------------------------------------------------------------
+// Cache de prompt
+//
+// Un modele n'a aucune memoire d'un appel a l'autre : pour se servir d'un
+// texte, il doit le convertir en etat interne -- le cache d'attention -- et
+// c'est cette conversion qui constitue la phase de lecture. Sur un telephone
+// elle coute environ une minute par millier de tokens.
+//
+// Or la plus grande partie du prompt ne change jamais : les consignes et le
+// profil du candidat sont identiques d'une candidature a l'autre, seule
+// l'annonce differe. Cet etat-la peut donc etre calcule une fois, ecrit dans
+// un fichier, et relu au lieu d'etre recalcule. Un demi-gigaoctet lu sur un
+// stockage UFS prend une demi-seconde ; le recalculer en prend deux cents.
+//
+// Le prefixe reutilisable n'est pas declare : on le retrouve en comparant les
+// tokens sauvegardes a ceux du prompt courant. La correspondance s'arrete
+// d'elle-meme au premier caractere qui differe, donc un profil modifie, une
+// consigne changee ou un autre modele invalident le cache sans qu'on ait a y
+// penser.
+// ---------------------------------------------------------------------------
+
+/**
+ * Restaure ce que le cache de [jpath] a en commun avec le prompt courant.
+ *
+ * A appeler entre nativeBeginGenerate et la premiere lecture de lot. Retourne
+ * le nombre de tokens du prompt desormais deja presents dans le cache -- 0 si
+ * le fichier manque, ne correspond pas, ou ne partage pas assez de tokens.
+ */
+JNI_FN(jint)
+Java_com_jobmaker_llm_LlamaBridge_nativeReutiliserCache(JNIEnv* env, jobject /*thiz*/,
+                                                        jlong handle, jstring jpath) {
+    Session* s = as_session(handle);
+    if (s == nullptr) return 0;
+    std::lock_guard<std::mutex> lock(s->mu);
+    if (s->prompt.empty() || s->prompt_lu != 0) return 0;
+
+    const std::string path = to_utf8(env, jpath);
+
+    // Le fichier peut contenir plus de tokens que le prompt courant : sans une
+    // capacite suffisante, llama.cpp refuse de le lire au lieu de le tronquer.
+    std::vector<llama_token> sauvegardes(static_cast<size_t>(s->n_ctx));
+    size_t n_sauvegardes = 0;
+    const size_t ok = llama_state_seq_load_file(
+        s->ctx, path.c_str(), /*dest_seq_id=*/0,
+        sauvegardes.data(), sauvegardes.size(), &n_sauvegardes);
+
+    if (ok == 0 || n_sauvegardes == 0) {
+        clear_kv(s);
+        return 0;
+    }
+
+    size_t commun = 0;
+    while (commun < n_sauvegardes && commun < s->prompt.size() &&
+           sauvegardes[commun] == s->prompt[commun]) {
+        ++commun;
+    }
+
+    // Il faut garder au moins un token a lire : c'est le dernier decode qui
+    // produit les logits, et ceux-la ne sont pas dans le cache.
+    if (commun >= s->prompt.size()) commun = s->prompt.size() - 1;
+
+    if (commun < static_cast<size_t>(kMinCache)) {
+        clear_kv(s);
+        return 0;
+    }
+
+    // Tout ce qui suit le prefixe commun appartient a une autre annonce.
+    llama_memory_seq_rm(llama_get_memory(s->ctx), 0,
+                        static_cast<llama_pos>(commun), -1);
+    s->prompt_lu = commun;
+    s->n_past    = static_cast<int>(commun);
+
+    LOGI("Cache de prompt : %zu tokens sur %zu repris de %s",
+         commun, s->prompt.size(), path.c_str());
+    return static_cast<jint>(commun);
+}
+
+/**
+ * Ecrit dans [jpath] l'etat correspondant au prompt entierement lu.
+ *
+ * A appeler quand le prompt vient d'etre lu et qu'aucun token n'a encore ete
+ * ecrit : le cache contient alors exactement le prompt. Retourne faux si le
+ * moteur refuse -- certains modeles a attention glissante ne savent pas
+ * exporter une sequence -- auquel cas l'appelant renonce simplement au cache.
+ */
+JNI_FN(jboolean)
+Java_com_jobmaker_llm_LlamaBridge_nativeSauverCache(JNIEnv* env, jobject /*thiz*/,
+                                                    jlong handle, jstring jpath) {
+    Session* s = as_session(handle);
+    if (s == nullptr) return JNI_FALSE;
+    std::lock_guard<std::mutex> lock(s->mu);
+    if (s->prompt.empty() || s->prompt_lu < s->prompt.size()) return JNI_FALSE;
+    if (s->n_emitted > 0) return JNI_FALSE;
+
+    const std::string path = to_utf8(env, jpath);
+    const size_t ecrit = llama_state_seq_save_file(
+        s->ctx, path.c_str(), /*seq_id=*/0, s->prompt.data(), s->prompt.size());
+    if (ecrit == 0) {
+        LOGW("Cache de prompt : ce modele ne sait pas exporter son etat");
+        return JNI_FALSE;
+    }
+    LOGI("Cache de prompt : %zu tokens ecrits (%.0f Mo)",
+         s->prompt.size(), ecrit / 1e6);
+    return JNI_TRUE;
 }
 
 // ---------------------------------------------------------------------------

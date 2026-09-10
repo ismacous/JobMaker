@@ -81,6 +81,22 @@ internal object LlamaBridge {
     external fun nativeEndGenerate(handle: Long)
 
     /**
+     * Restaure du cache de [path] ce qu'il a en commun avec le prompt courant.
+     * A appeler entre nativeBeginGenerate et la premiere lecture de lot.
+     *
+     * @return le nombre de tokens du prompt deja presents dans le cache, 0 si
+     *   le fichier manque ou ne partage pas assez de tokens.
+     */
+    external fun nativeReutiliserCache(handle: Long, path: String): Int
+
+    /**
+     * Ecrit l'etat du prompt entierement lu dans [path]. A appeler avant
+     * d'ecrire le moindre token. Faux si le modele ne sait pas exporter son
+     * etat, auquel cas il n'y a qu'a renoncer au cache.
+     */
+    external fun nativeSauverCache(handle: Long, path: String): Boolean
+
+    /**
      * Change le nombre de threads sans recharger le modele.
      *
      * @param nThreads pour l'ecriture des tokens, limitee par la memoire.

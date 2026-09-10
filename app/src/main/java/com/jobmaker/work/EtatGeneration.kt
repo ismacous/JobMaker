@@ -78,11 +78,13 @@ data class EtatGeneration(
         appendLine()
         traces.forEach {
             appendLine(it.ligne())
+            it.ligneCache().takeIf { l -> l.isNotBlank() }?.let { l -> appendLine(l) }
             appendLine(it.ligneMachine())
         }
         appendLine()
 
-        val lus = traces.sumOf { it.tokensPrompt }
+        val lus = traces.sumOf { it.tokensCalcules }
+        val repris = traces.sumOf { it.tokensReutilises }
         val ecrits = traces.sumOf { it.tokensEcrits }
         val msLecture = traces.sumOf { it.msPrompt }
         val msEcriture = traces.sumOf { it.msEcriture }
@@ -90,8 +92,21 @@ data class EtatGeneration(
             msLecture / 1000.0, lus * 1000.0 / msLecture.coerceAtLeast(1)))
         appendLine("Total ecrit : $ecrits tokens en %.1f s (%.1f tok/s)".format(
             msEcriture / 1000.0, ecrits * 1000.0 / msEcriture.coerceAtLeast(1)))
+        if (repris > 0 && lus > 0) {
+            val vitesse = lus * 1000.0 / msLecture.coerceAtLeast(1)
+            appendLine("Repris du cache : $repris tokens jamais recalcules, " +
+                "soit environ %.0f s economisees".format(repris / vitesse))
+        } else if (repris > 0) {
+            appendLine("Repris du cache : $repris tokens jamais recalcules")
+        }
 
-        val hors = dureeTotaleMs - msLecture - msEcriture
+        val msCache = traces.sumOf { it.msCache }
+        if (msCache > 200) {
+            appendLine("Fichier de cache : %.1f s de lecture et d'ecriture disque"
+                .format(msCache / 1000.0))
+        }
+
+        val hors = dureeTotaleMs - msLecture - msEcriture - msCache
         if (hors > 1000) {
             appendLine("Hors modele : %.1f s (chargement, verifications, ecriture disque)"
                 .format(hors / 1000.0))
@@ -113,26 +128,61 @@ data class EtatGeneration(
         else occupation.sumOf { it.compteurs.msProcesseur }.toDouble() /
             occupation.sumOf { it.totalMs }.coerceAtLeast(1)
 
-        if (defauts > 1000) {
+        // Un defaut majeur coute une lecture sur stockage, soit environ 80 us
+        // sur de l'UFS. Le seuil precedent -- mille defauts -- accusait la
+        // memoire pour huit centiemes de seconde perdues, et faisait reduire un
+        // contexte qui n'y etait pour rien. On compare donc au temps reel : sous
+        // 5 % du total, l'eviction existe mais n'explique rien.
+        val octetsRelus = traces.sumOf { it.compteurs.octetsLus.coerceAtLeast(0) }
+        val msDefauts = defauts * MS_PAR_DEFAUT_MAJEUR
+        if (defauts > 0) {
             appendLine()
-            appendLine("$defauts pages du modele ont du etre relues sur le stockage : Android " +
-                "evince les poids faute de memoire. Reduisez la taille de contexte dans " +
-                "Reglages, ou fermez les autres applications.")
+            append("$defauts pages relues sur le stockage (%.0f Mo)".format(octetsRelus / 1e6))
+            if (msDefauts > dureeTotaleMs * 0.05) {
+                appendLine(" : environ %.0f s perdues a attendre le stockage. Android evince "
+                    .format(msDefauts / 1000.0) +
+                    "les poids du modele faute de memoire. Reduisez la fenetre de contexte, " +
+                    "ou fermez les autres applications.")
+            } else {
+                appendLine(" : environ %.0f s, soit moins de 5 %% du total. L'eviction existe "
+                    .format(msDefauts / 1000.0) + "mais n'explique pas la lenteur.")
+            }
         }
+        appendLine()
+        appendLine(
+            when {
+                coeursMoyens >= 3.0 ->
+                    "Coeurs occupes : %.2f en moyenne. Le processeur calcule a plein regime. "
+                        .format(coeursMoyens) +
+                        "Ce qui reste lent l'est parce que la machine va a cette vitesse-la, " +
+                        "pas parce qu'elle attend."
+                coeursMoyens >= 1.5 ->
+                    "Coeurs occupes : %.2f en moyenne. Le processeur travaille a temps partiel : "
+                        .format(coeursMoyens) +
+                        "contention entre threads, ou attente de la memoire."
+                else ->
+                    "Coeurs occupes : %.2f en moyenne. Le processeur attend plus qu'il ne calcule."
+                        .format(coeursMoyens)
+            }
+        )
+
+        // Avec plusieurs etapes, l'ecart entre la premiere et la derniere mesure
+        // le bridage thermique : meme machine, meme travail, vitesse divisee.
         val premiere = traces.firstOrNull { it.tokensEcrits > 20 }
         val derniere = traces.lastOrNull { it.tokensEcrits > 20 }
         if (premiere != null && derniere != null && premiere !== derniere &&
             derniere.ecritureParSeconde < premiere.ecritureParSeconde * 0.6
         ) {
-            appendLine()
-            append("La vitesse d'ecriture a chute de %.1f a %.1f tok/s entre la premiere et "
-                .format(premiere.ecritureParSeconde, derniere.ecritureParSeconde))
-            appendLine(
-                if (coeursMoyens >= 3.0)
-                    "la derniere etape, coeurs pleins : le telephone chauffe et se bride."
-                else
-                    "la derniere etape, coeurs a moitie vides : il attend la memoire."
-            )
+            appendLine("La vitesse d'ecriture est tombee de %.1f a %.1f tok/s d'une etape a "
+                .format(premiere.ecritureParSeconde, derniere.ecritureParSeconde) +
+                "l'autre : le telephone chauffe et se bride. Retirez la coque, posez-le sur " +
+                "une surface froide, et debranchez-le -- la charge ajoute de la chaleur sans " +
+                "rien accelerer.")
         }
     }.trim()
+
+    private companion object {
+        /** Latence d'une lecture sur stockage UFS, pour chiffrer les defauts majeurs. */
+        const val MS_PAR_DEFAUT_MAJEUR = 0.08
+    }
 }

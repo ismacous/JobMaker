@@ -267,10 +267,11 @@ fun ReglagesScreen(
                     steps = 14,
                 )
                 Text(
-                    "Quantite de texte que le modele peut lire d'un coup (offre + profil + " +
-                        "sortie). 8192 convient a la plupart des annonces. Augmenter consomme " +
-                        "beaucoup plus de memoire ; si l'application se ferme pendant une " +
-                        "generation, reduisez d'abord cette valeur.",
+                    "Un plafond, pas une reservation : l'application calcule la fenetre dont " +
+                        "elle a reellement besoin (annonce + profil + sortie) et ne depasse " +
+                        "jamais cette valeur. La monter tres haut ne sert donc a rien, mais " +
+                        "la descendre trop bas fera echouer les annonces longues. 8192 " +
+                        "convient a la plupart des cas.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -287,9 +288,12 @@ fun ReglagesScreen(
                     steps = (vm.nombreCoeurs - 2).coerceAtLeast(0),
                 )
                 Text(
-                    "Utiliser tous les coeurs n'accelere pas forcement : la memoire devient le " +
-                        "facteur limitant, et le telephone chauffe puis se bride. " +
-                        "Laisser un ou deux coeurs libres donne souvent le meilleur resultat.",
+                    "Ce nombre s'applique a la lecture, qui calcule vraiment et profite de " +
+                        "chaque coeur. L'ecriture, elle, en utilise deux de moins : elle " +
+                        "attend la memoire, pas le calcul, et les coeurs en trop ne feraient " +
+                        "que chauffer le telephone -- qui se bride ensuite, et ecrit alors " +
+                        "deux fois moins vite. Le bouton \"Mesurer\" de l'ecran Modeles " +
+                        "donne les deux vitesses sur votre appareil.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -310,6 +314,21 @@ fun ReglagesScreen(
                         "(jobmaker.opencl=false, valeur par defaut). Laissez 0.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                LigneInterrupteur(
+                    titre = "Garder en cache la lecture du profil",
+                    detail = "Une IA n'a aucune memoire d'une candidature a l'autre : pour se " +
+                        "servir d'un texte, elle doit d'abord le convertir en etat interne, et " +
+                        "c'est cette conversion qui prend des minutes. Or vos consignes et " +
+                        "votre profil sont les memes a chaque fois.\n\n" +
+                        "Active, cet etat est calcule une fois puis relu sur le stockage : " +
+                        "une demi-seconde au lieu de plusieurs minutes. Seule l'annonce, qui " +
+                        "change, reste a lire. Le fichier occupe quelques centaines de Mo et " +
+                        "se refait tout seul quand vous modifiez votre profil. Desactiver " +
+                        "l'efface.",
+                    valeur = reglages.cachePrompt,
+                    onChange = vm::setCachePrompt,
                 )
 
                 LigneInterrupteur(

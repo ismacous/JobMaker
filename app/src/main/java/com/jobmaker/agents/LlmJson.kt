@@ -32,6 +32,7 @@ suspend fun <T> LlmRuntime.generateJson(
     params: GenerationParams,
     suppressReasoning: Boolean,
     etape: String = "",
+    cacheDePrompt: java.io.File? = null,
     onLecturePrompt: ((Int, Int, Long) -> Unit)? = null,
     onToken: ((String, Int) -> Unit)? = null,
     onTrace: ((TraceAppel) -> Unit)? = null,
@@ -54,7 +55,9 @@ suspend fun <T> LlmRuntime.generateJson(
             "(prompt $tokensPrompt tokens)")
     }
 
-    val raw = complete(messages, effectifs, etape, onLecturePrompt, onToken, onTrace)
+    val raw = complete(
+        messages, effectifs, etape, cacheDePrompt, onLecturePrompt, onToken, onTrace,
+    )
 
     parseOrNull(serializer, raw)?.let { return it }
 
@@ -81,6 +84,8 @@ suspend fun <T> LlmRuntime.generateJson(
                 "longue pour etre corrigee. Essayez un autre modele, ou raccourcissez l'offre."
         )
 
+    // Sans cacheDePrompt : le prompt de reparation ne partage rien avec celui
+    // d'origine, et l'y ecrire remplacerait un cache utile par un cache mort.
     val repaired = complete(
         messages = messagesReparation,
         params = reparationAjustee,
@@ -121,6 +126,8 @@ suspend fun LlmRuntime.generateProse(
             "Le texte a lire remplit deja la fenetre de contexte du modele. " +
                 "Raccourcissez-le, ou augmentez la taille de contexte dans Reglages."
         )
-    val raw = complete(messages, effectifs, etape, onLecturePrompt, onToken, onTrace)
+    val raw = complete(
+        messages, effectifs, etape, null, onLecturePrompt, onToken, onTrace,
+    )
     return JsonRepair.cleanProse(raw)
 }

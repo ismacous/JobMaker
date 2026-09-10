@@ -501,6 +501,15 @@ te servent a viser juste, pas a etre exhaustif.
 }
 """.trimIndent()
 
+    /**
+     * L'ordre des blocs n'est pas cosmetique.
+     *
+     * Le profil vient avant l'annonce parce qu'il ne change pas d'une
+     * candidature a l'autre : consignes et profil forment ainsi un prefixe
+     * identique, dont l'etat interne est calcule une fois puis relu sur le
+     * disque. Remonter l'annonce en tete rendrait ce prefixe different a chaque
+     * fois et couterait trois minutes de recalcul par candidature.
+     */
     fun candidatureUser(
         offre: String,
         profil: String,
@@ -509,16 +518,16 @@ te servent a viser juste, pas a etre exhaustif.
         disponibilite: String,
         unePage: Boolean,
     ) = """
---- ANNONCE ---
-${offre.trim()}
---- FIN DE L'ANNONCE ---
-
 --- PROFIL DU CANDIDAT (seule source de faits) ---
 $profil
---- FIN DU PROFIL ---
 
 Signature a utiliser : $nomComplet
 ${if (disponibilite.isNotBlank()) "Disponibilite declaree : $disponibilite" else ""}
+--- FIN DU PROFIL ---
+
+--- ANNONCE ---
+${offre.trim()}
+--- FIN DE L'ANNONCE ---
 
 Analyse l'annonce, choisis l'angle, puis redige le CV et la lettre en ${langueLabel(langue)}.
 ${if (unePage) "Contrainte : le CV doit tenir sur UNE page. Sois selectif." else ""}

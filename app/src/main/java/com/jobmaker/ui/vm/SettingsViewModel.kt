@@ -38,6 +38,13 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun setRelecture(v: Boolean) = lance { container.settingsRepository.setRelectureActive(v) }
     fun setAnalyseApprofondie(v: Boolean) =
         lance { container.settingsRepository.setAnalyseApprofondie(v) }
+    fun setCachePrompt(v: Boolean) = lance {
+        container.settingsRepository.setCachePrompt(v)
+        if (!v) container.modelManager.viderCaches()
+    }
+
+    /** Taille des caches de prompt, pour l'afficher dans les reglages. */
+    fun tailleCaches(): Long = container.modelManager.tailleCaches()
     fun setPasses(v: Int) = lance { container.settingsRepository.setPassesCorrection(v) }
     fun setLangue(v: LangueSortie) = lance { container.settingsRepository.setLangueSortie(v) }
     fun setUnePage(v: Boolean) = lance { container.settingsRepository.setCvUnePage(v) }

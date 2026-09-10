@@ -53,6 +53,17 @@ data class Settings(
      * usage de l'appel suivant. Mesure sur un S25 Ultra : cela double le temps.
      */
     val analyseApprofondie: Boolean = false,
+    /**
+     * Garder sur le disque l'etat interne des consignes et du profil.
+     *
+     * Un modele n'a aucune memoire d'un appel a l'autre : pour se servir d'un
+     * texte il doit le convertir en etat interne, et c'est cette conversion qui
+     * constitue la phase de lecture. Comme les consignes et le profil ne
+     * changent pas d'une candidature a l'autre, cet etat est calcule une fois
+     * puis relu -- une demi-seconde de disque au lieu de plusieurs minutes de
+     * calcul. Le fichier pese quelques centaines de megaoctets.
+     */
+    val cachePrompt: Boolean = true,
     val passesCorrection: Int = 1,
     val langueSortie: LangueSortie = LangueSortie.AUTO,
     val cvUnePage: Boolean = true,
@@ -80,6 +91,7 @@ class SettingsRepository(private val context: Context) {
             photoSurCv = this[KEY_PHOTO] ?: false,
             relectureActive = this[KEY_RELECTURE] ?: false,
             analyseApprofondie = this[KEY_APPROFONDIE] ?: false,
+            cachePrompt = this[KEY_CACHE_PROMPT] ?: true,
             passesCorrection = this[KEY_PASSES] ?: 1,
             langueSortie = runCatching {
                 LangueSortie.valueOf(this[KEY_LANGUE] ?: LangueSortie.AUTO.name)
@@ -108,6 +120,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setRelectureActive(value: Boolean) = context.dataStore.edit { it[KEY_RELECTURE] = value }
     suspend fun setAnalyseApprofondie(value: Boolean) =
         context.dataStore.edit { it[KEY_APPROFONDIE] = value }
+    suspend fun setCachePrompt(value: Boolean) =
+        context.dataStore.edit { it[KEY_CACHE_PROMPT] = value }
     suspend fun setPassesCorrection(value: Int) = context.dataStore.edit { it[KEY_PASSES] = value }
     suspend fun setLangueSortie(value: LangueSortie) =
         context.dataStore.edit { it[KEY_LANGUE] = value.name }
@@ -124,6 +138,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_PHOTO = booleanPreferencesKey("photo_cv")
         val KEY_RELECTURE = booleanPreferencesKey("relecture")
         val KEY_APPROFONDIE = booleanPreferencesKey("analyse_approfondie")
+        val KEY_CACHE_PROMPT = booleanPreferencesKey("cache_prompt")
         val KEY_PASSES = intPreferencesKey("passes_correction")
         val KEY_LANGUE = stringPreferencesKey("langue_sortie")
         val KEY_UNE_PAGE = booleanPreferencesKey("cv_une_page")
