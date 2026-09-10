@@ -9,10 +9,15 @@ import org.junit.Test
  * Ce detecteur decide quand couper la generation. Une erreur dans un sens
  * coute des minutes d'ecriture inutile ; dans l'autre, elle tronque un CV.
  * Les cas ci-dessous sont ceux que produit reellement un petit modele.
+ *
+ * Les chaines sont echappees plutot qu'ecrites en brut : un litteral brut se
+ * termine au premier """, donc un JSON qui finit par un guillemet y perd ce
+ * guillemet sans que rien ne le signale. Le test devient alors un test de
+ * JSON tronque, pas celui qu'on croyait ecrire.
  */
 class DetecteurJsonCompletTest {
 
-    /** Alimente le detecteur token par token, comme le fait le moteur. */
+    /** Alimente le detecteur par petits morceaux, comme le fait le moteur. */
     private fun parMorceaux(texte: String, taille: Int = 3): Pair<Boolean, Int> {
         val d = DetecteurJsonComplet()
         var consommes = 0
@@ -28,35 +33,36 @@ class DetecteurJsonCompletTest {
 
     @Test
     fun `un objet complet est reconnu des sa derniere accolade`() {
-        val (coupe, consommes) = parMorceaux("""{"poste": "Magasinier"}  et voila !""")
+        val (coupe, consommes) = parMorceaux("{\"poste\": \"Magasinier\"}  et voila !")
         assertTrue(coupe)
         assertTrue("la coupure doit tomber sur l'accolade fermante", consommes <= 25)
     }
 
     @Test
     fun `un objet incomplet ne declenche rien`() {
-        val (coupe, _) = parMorceaux("""{"poste": "Magasinier", "missions": ["Reception"""")
+        val (coupe, _) = parMorceaux("{\"poste\": \"Magasinier\", \"missions\": [\"Reception\"")
         assertFalse(coupe)
     }
 
     @Test
     fun `les accolades dans le texte des champs ne comptent pas`() {
         val d = DetecteurJsonComplet()
-        assertFalse(d.avaler("""{"accroche": "Utilise la syntaxe {clef} au quotidien"""))
-        assertTrue(d.avaler("""}"""))
+        assertFalse(d.avaler("{\"accroche\": \"Utilise la syntaxe {clef} au quotidien\""))
+        assertTrue(d.avaler("}"))
     }
 
     @Test
     fun `un guillemet echappe ne ferme pas la chaine`() {
-        val d = DetecteurJsonComplet()
         // Contenu reel : {"titre": "Poste dit \"cariste\" }"
+        val d = DetecteurJsonComplet()
         assertFalse(d.avaler("{\"titre\": \"Poste dit \\\"cariste\\\" }\""))
         assertTrue(d.avaler("}"))
     }
 
     @Test
     fun `l'imbrication est suivie jusqu'au dernier niveau`() {
-        val json = """{"cv": {"experiences": [{"puces": ["a", "b"]}]}, "lettre": {"objet": "x"}}"""
+        val json = "{\"cv\": {\"experiences\": [{\"puces\": [\"a\", \"b\"]}]}, " +
+            "\"lettre\": {\"objet\": \"x\"}}"
         val (coupe, consommes) = parMorceaux(json + " Merci de votre lecture.")
         assertTrue(coupe)
         assertTrue(consommes <= json.length + 3)
@@ -64,8 +70,8 @@ class DetecteurJsonCompletTest {
 
     @Test
     fun `un brouillon de JSON dans un bloc de raisonnement est ignore`() {
-        val texte = """<think>Je vais repondre {"poste": "test"} puis verifier.</think>""" +
-            """{"poste": "Magasinier", "entreprise": "Leroy Merlin"}"""
+        val texte = "<think>Je vais repondre {\"poste\": \"test\"} puis verifier.</think>" +
+            "{\"poste\": \"Magasinier\", \"entreprise\": \"Leroy Merlin\"}"
         val (coupe, consommes) = parMorceaux(texte)
         assertTrue(coupe)
         assertTrue(
@@ -77,20 +83,20 @@ class DetecteurJsonCompletTest {
     @Test
     fun `une balise de raisonnement coupee entre deux tokens est reconnue`() {
         val d = DetecteurJsonComplet()
-        // "<thi" / "nk>" : c'est exactement ainsi que le modele l'emet.
+        // "<thi" puis "nk>" : c'est exactement ainsi que le modele l'emet.
         assertFalse(d.avaler("<thi"))
         assertFalse(d.avaler("nk>"))
-        assertFalse(d.avaler("""{"essai": 1}"""))
+        assertFalse(d.avaler("{\"essai\": 1}"))
         assertFalse(d.avaler("</thin"))
         assertFalse(d.avaler("k>"))
-        assertFalse(d.avaler("""{"poste": "Cariste"""))
-        assertTrue(d.avaler("""}"""))
+        assertFalse(d.avaler("{\"poste\": \"Cariste\""))
+        assertTrue(d.avaler("}"))
     }
 
     @Test
     fun `un tableau de premier niveau est reconnu aussi`() {
         val d = DetecteurJsonComplet()
-        assertTrue(d.avaler("""["a", "b"]"""))
+        assertTrue(d.avaler("[\"a\", \"b\"]"))
     }
 
     @Test
