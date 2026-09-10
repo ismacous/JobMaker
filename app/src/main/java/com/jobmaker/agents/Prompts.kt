@@ -572,6 +572,7 @@ ${consigneSortie(sortie)}
             "TU NE PRODUIS QUE LA LETTRE. Le champ \"cv\" doit valoir exactement {} : " +
                 "n'ecris ni titre, ni accroche, ni experience. Tout mot ecrit dans " +
                 "\"cv\" est du temps perdu."
+    }
 
     // -----------------------------------------------------------------------
     // Etape 2 fusionnee : CV ET lettre
