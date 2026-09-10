@@ -149,7 +149,13 @@ std::string piece_of(const llama_vocab* vocab, llama_token token) {
 }
 
 // Taille d'un lot de lecture du prompt. Doit rester <= n_batch du contexte.
-constexpr int kLotPrompt = 256;
+//
+// C'est aussi le grain de l'annulation : la lecture ne peut etre interrompue
+// qu'entre deux lots. A la centaine de tokens par seconde qu'un telephone
+// recent atteint en lecture, un lot de 512 dure quelques secondes -- assez
+// court pour que le bouton reponde, assez long pour que le calcul soit
+// efficace.
+constexpr int kLotPrompt = 512;
 
 void build_sampler(Session* s, float temp, float top_p, int top_k,
                    float repeat_penalty, int repeat_last_n, uint32_t seed) {
@@ -250,8 +256,14 @@ Java_com_jobmaker_llm_LlamaBridge_nativeLoad(JNIEnv* env, jobject /*thiz*/,
 
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx     = static_cast<uint32_t>(n_ctx);
-    cp.n_batch   = 256;
-    cp.n_ubatch  = 256;
+    // 512 est la valeur par defaut de llama.cpp, et elle ne coute presque rien
+    // ici : les tampons de calcul grandissent avec le nombre de tokens du lot
+    // fois la largeur du modele, soit quelques megaoctets, et non avec le
+    // vocabulaire -- les logits ne sont demandes que pour le dernier token.
+    // Des lots plus grands amortissent mieux la construction du graphe et
+    // donnent aux multiplications de matrices une forme plus favorable.
+    cp.n_batch   = 512;
+    cp.n_ubatch  = 512;
     cp.n_threads = n_threads;
     cp.n_threads_batch = n_threads;
     cp.no_perf   = true;

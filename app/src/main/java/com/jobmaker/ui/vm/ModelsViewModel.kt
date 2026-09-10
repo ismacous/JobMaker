@@ -217,10 +217,18 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
                 val msChargement = System.currentTimeMillis() - debutChargement
                 val infoMoteur = container.llmRuntime.systemInfo()
 
-                // Volontairement court : aux vitesses constatees, 128 tokens par
-                // passe demanderaient une heure de mesure.
+                // Le prompt reste court pour le balayage de threads : c'est la
+                // vitesse d'ecriture qu'on compare, et elle ne depend pas de lui.
+                //
+                // Les tokens ecrits, eux, ont ete remontes de 4 a 32. Quatre ne
+                // mesuraient rien d'utilisable : les premiers tokens qui suivent
+                // la lecture d'un prompt paient la mise en place des tampons, et
+                // le chiffre obtenu n'avait aucun rapport avec la vitesse d'une
+                // vraie redaction. Trente-deux tokens coutent trois secondes par
+                // passe et donnent un chiffre comparable a celui du bilan de
+                // generation -- ce qui est tout l'interet de la mesure.
                 val tokensPrompt = 32
-                val tokensEcrits = 4
+                val tokensEcrits = 32
 
                 // Premier passage : il paie le chargement des pages du modele
                 // depuis le stockage. L'ecart avec les suivants mesure
@@ -238,10 +246,10 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
 
-                // Le banc precedent lisait 32 tokens d'un seul lot et trouvait
-                // le moteur rapide, alors qu'une vraie generation en lit un
-                // millier par lots de 256 et rampe. L'ecart tient forcement a
-                // l'une de ces deux differences : ce balayage les separe.
+                // Une vraie generation lit plusieurs milliers de tokens par lots
+                // de 256, la ou un banc court en lit trente-deux d'un seul coup.
+                // Ce balayage separe les deux differences -- la longueur du
+                // prompt et la taille des lots -- pour savoir laquelle compte.
                 val longueurs = listOf(
                     32 to 32,
                     128 to 128,
@@ -249,13 +257,14 @@ class ModelsViewModel(private val container: AppContainer) : ViewModel() {
                     512 to 256,
                     1024 to 256,
                     1024 to 64,
-                    2048 to 256,
+                    1024 to 512,
+                    2048 to 512,
                 ).filter { (n, _) -> n + tokensEcrits + 8 <= info.contextSize }
                 // Du plus court au plus long, avec un budget : si l'effondrement
                 // est bien la, les passages longs prendraient vingt minutes et
                 // le banc deviendrait inutilisable.
                 val parLongueur = mutableListOf<com.jobmaker.llm.LlmRuntime.Mesure>()
-                var budgetMs = 120_000L
+                var budgetMs = 150_000L
                 var abandonne = false
                 for ((n, lot) in longueurs) {
                     if (budgetMs <= 0) { abandonne = true; break }

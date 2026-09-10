@@ -249,10 +249,12 @@ class Orchestrator(
             user = Prompts.relecteurUser(
                 analyse, digest.texte, cv.texteIntegral(), lettre.texteIntegral(),
             ),
-            params = GenerationParams.precise(maxTokens = 1400),
+            params = GenerationParams.precise(maxTokens = MAX_RELECTURE),
             suppressReasoning = relectureNoThink,
+            etape = "Relecture critique",
             onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
-            onToken = { emettre(PipelineEvent.Jeton(it)) },
+            onToken = { texte, n -> emettre(PipelineEvent.Jeton(texte, n)) },
+            onTrace = { emettre(PipelineEvent.Mesure(it)) },
         )
 
         // Les controles mecaniques passent apres l'IA et la completent : ils ne
