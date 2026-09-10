@@ -10,11 +10,15 @@ import android.print.PrintAttributes
 import android.print.PrintManager
 import android.util.Base64
 import android.util.Log
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.MainThread
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
@@ -62,9 +66,18 @@ class PdfExporter(private val context: Context) {
     suspend fun imprimer(activity: Activity, html: String, nomDocument: String): String? =
         withContext(Dispatchers.Main) {
             runCatching {
+                liberer()
                 val webView = creerWebView(activity)
                 webViewEnCours = webView
-                chargerHtml(webView, html)
+                try {
+                    // Sans borne, une WebView qui ne signale jamais la fin de son
+                    // chargement laisse la coroutine suspendue pour toujours : le
+                    // bouton ne fait alors rien du tout, sans le moindre message.
+                    withTimeout(CHARGEMENT_MAX_MS) { chargerHtml(webView, html) }
+                } catch (_: TimeoutCancellationException) {
+                    liberer()
+                    return@runCatching "La mise en page du document n'a pas abouti. Reessayez."
+                }
 
                 val gestionnaire = activity.getSystemService(Context.PRINT_SERVICE) as? PrintManager
                     ?: error("Service d'impression indisponible sur cet appareil.")
@@ -92,18 +105,43 @@ class PdfExporter(private val context: Context) {
     /** Libere la WebView une fois la boite de dialogue refermee. */
     @MainThread
     fun liberer() {
-        webViewEnCours?.destroy()
+        webViewEnCours?.let { vue ->
+            (vue.parent as? ViewGroup)?.removeView(vue)
+            vue.destroy()
+        }
         webViewEnCours = null
     }
 
+    /**
+     * La WebView est reellement ajoutee a la fenetre, en un pixel invisible.
+     *
+     * Une WebView detachee de toute fenetre ne garantit ni le declenchement de
+     * onPageFinished ni la mise en page de son contenu : le PDF sortait vide,
+     * ou le bouton restait sans effet. Un pixel transparent dans le decor suffit
+     * a lui donner le cycle de vie qu'elle attend, sans rien afficher. Elle est
+     * retiree par [liberer].
+     */
     private fun creerWebView(activity: Activity): WebView = WebView(activity).apply {
         settings.javaScriptEnabled = false
         settings.allowFileAccess = false
         settings.allowContentAccess = false
         // Rendu a largeur A4 pour que WebView n'applique pas sa mise a
         // l'echelle « mobile », qui casserait la mise en page.
-        measure(PX_A4_LARGEUR, PX_A4_HAUTEUR)
-        layout(0, 0, PX_A4_LARGEUR, PX_A4_HAUTEUR)
+        settings.useWideViewPort = true
+        settings.loadWithOverviewMode = false
+        alpha = 0f
+        visibility = View.VISIBLE
+
+        val decor = activity.window?.decorView as? ViewGroup
+        if (decor != null) {
+            decor.addView(this, ViewGroup.LayoutParams(1, 1))
+        } else {
+            measure(
+                View.MeasureSpec.makeMeasureSpec(PX_A4_LARGEUR, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(PX_A4_HAUTEUR, View.MeasureSpec.EXACTLY),
+            )
+            layout(0, 0, PX_A4_LARGEUR, PX_A4_HAUTEUR)
+        }
     }
 
     private suspend fun chargerHtml(webView: WebView, html: String) =
@@ -149,6 +187,7 @@ class PdfExporter(private val context: Context) {
 
     private companion object {
         const val TAG = "PdfExporter"
+        const val CHARGEMENT_MAX_MS = 15_000L
 
         // A4 a 96 dpi, la resolution de reference de WebView.
         const val PX_A4_LARGEUR = 794
