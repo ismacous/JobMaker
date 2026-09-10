@@ -21,6 +21,12 @@ object FactCheck {
         val organisationsSuspectes: List<String>,
         /** Chiffres presents dans le CV et introuvables dans le profil. */
         val chiffresSuspects: List<String>,
+        /**
+         * Diplomes annonces dans le CV et absents du profil. La faute la plus
+         * grave que l'application puisse commettre : l'annonce exige un diplome,
+         * le modele le recopie, et le CV devient un faux.
+         */
+        val diplomesSuspects: List<String>,
         /** Mots-cles de l'annonce effectivement presents dans le CV. */
         val motsClesCouverts: List<String>,
         val motsClesAbsents: List<String>,
@@ -37,7 +43,8 @@ object FactCheck {
             }
 
         val aDesAlertes: Boolean
-            get() = organisationsSuspectes.isNotEmpty() || chiffresSuspects.isNotEmpty()
+            get() = organisationsSuspectes.isNotEmpty() || chiffresSuspects.isNotEmpty() ||
+                diplomesSuspects.isNotEmpty()
     }
 
     fun verifier(profile: Profile, analyse: JobAnalysis, cv: CvContent, lettre: LetterContent): Rapport {
@@ -79,6 +86,27 @@ object FactCheck {
             .filter { it !in nombresProfil }
             .distinct()
 
+        // --- diplomes ---
+        // Compares aux seuls diplomes declares, pas au texte entier du profil :
+        // un "Assistant de Service Social" invente se retrouverait sinon
+        // "connu" parce que le profil contient les mots "assistant" et "social".
+        val diplomesProfil = profile.formations.map { normaliser(it.diplome) }
+            .filter { it.length >= 3 }
+        val diplomesSuspects = cv.formations.map { it.diplome.trim() }
+            .filter { it.length >= 3 }
+            .distinct()
+            .filterNot { d ->
+                val n = normaliser(d)
+                diplomesProfil.any { p ->
+                    // Un mot en commun ne suffit pas pour un diplome : "licence
+                    // professionnelle logistique" partagerait "logistique" avec
+                    // un "bac pro logistique" et passerait pour le meme titre.
+                    // Le niveau doit concorder aussi.
+                    val memeIntitule = p.contains(n) || n.contains(p) || jetonsCommuns(n, p)
+                    memeIntitule && niveauCompatible(n, p)
+                }
+            }
+
         // --- mots-cles ---
         val motsCles = (analyse.motsClesAts + analyse.competencesRequises + analyse.outils)
             .map { it.trim() }
@@ -97,6 +125,7 @@ object FactCheck {
         return Rapport(
             organisationsSuspectes = orgsSuspectes,
             chiffresSuspects = chiffresSuspects,
+            diplomesSuspects = diplomesSuspects,
             motsClesCouverts = couverts,
             motsClesAbsents = absents,
             puceTropLongues = tropLongues,
@@ -152,6 +181,31 @@ object FactCheck {
      * organisations comme la meme si elles partagent un mot distinctif (les
      * formes juridiques et les mots passe-partout etant ecartes).
      */
+    /**
+     * Niveaux de diplome reconnus, du moins eleve au plus eleve. Sert a refuser
+     * qu'un intitule du CV soit accepte comme reformulation d'un diplome du
+     * profil quand les deux n'annoncent pas le meme niveau.
+     */
+    private val NIVEAUX = listOf(
+        "doctorat" to listOf("doctorat", "phd"),
+        "master" to listOf("master", "mastere", "ingenieur", "bac 5"),
+        "licence" to listOf("licence", "bachelor", "bac 3"),
+        "bac2" to listOf("bts", "dut", "deug", "but", "bac 2"),
+        "detat" to listOf("diplome d etat", "diplome etat"),
+        "bac" to listOf("baccalaureat", "bac"),
+        "cap" to listOf("cap", "bep"),
+    )
+
+    private fun niveau(normalise: String): String? =
+        NIVEAUX.firstOrNull { (_, formes) -> formes.any { normalise.contains(it) } }?.first
+
+    /** Vrai si les deux intitules n'annoncent pas des niveaux differents. */
+    private fun niveauCompatible(a: String, b: String): Boolean {
+        val na = niveau(a) ?: return true
+        val nb = niveau(b) ?: return true
+        return na == nb
+    }
+
     private fun jetonsCommuns(orgNormalisee: String, referenceNormalisee: String): Boolean {
         val jetons = orgNormalisee.split(' ')
             .filter { it.length >= 4 && it !in MOTS_VIDES }

@@ -143,6 +143,31 @@ data class LetterContent(
 }
 
 /** Etape 5 : le rapport de relecture. */
+/**
+ * Sortie de la premiere etape du pipeline : analyse de l'annonce et strategie
+ * de candidature, produites en un seul appel.
+ *
+ * Les deux etaient separees a l'origine, ce qui obligeait le modele a relire
+ * l'annonce et le profil une seconde fois pour un gain nul : la strategie
+ * decoule directement de l'analyse.
+ */
+@Serializable
+data class DossierPreparation(
+    val analyse: JobAnalysis = JobAnalysis(),
+    val strategie: Strategy = Strategy(),
+)
+
+/**
+ * Sortie de la seconde etape : le CV et la lettre, ecrits en un seul appel a
+ * partir du meme dossier. Les separer coutait une relecture complete du
+ * contexte -- plusieurs minutes sur un telephone.
+ */
+@Serializable
+data class DocumentsRediges(
+    val cv: CvContent = CvContent(),
+    val lettre: LetterContent = LetterContent(),
+)
+
 @Serializable
 data class Review(
     val scoreGlobal: Int = 0,

@@ -3,6 +3,8 @@ package com.jobmaker.agents
 import android.util.Log
 import com.jobmaker.data.model.Candidature
 import com.jobmaker.data.model.CvContent
+import com.jobmaker.data.model.DocumentsRediges
+import com.jobmaker.data.model.DossierPreparation
 import com.jobmaker.data.model.JobAnalysis
 import com.jobmaker.data.model.JobExplanation
 import com.jobmaker.data.model.LetterContent
@@ -63,7 +65,7 @@ class Orchestrator(
         candidatureExistante: Candidature? = null,
     ): Flow<PipelineEvent> = channelFlow {
         val relecture = settings.relectureActive
-        val total = if (relecture) 6 else 4
+        val total = if (relecture) 4 else 2
 
         try {
             require(offre.isNotBlank()) { "Collez d'abord le texte de l'offre." }
@@ -71,21 +73,23 @@ class Orchestrator(
                 "Renseignez au moins votre nom dans l'onglet Profil."
             }
 
-            // ---------- 1. Analyse de l'offre ----------
-            send(PipelineEvent.Etape(1, total, "Analyse de l'offre",
-                "Lecture de l'annonce et extraction des exigences reelles"))
-            val (analyseModel, analyseNoThink) = charger(AgentRole.ANALYSIS, settings)
-            send(PipelineEvent.Modele(analyseModel))
+            // ---------- 1. Analyse de l'offre et strategie ----------
+            send(PipelineEvent.Etape(1, total, "Analyse et strategie",
+                "Lecture de l'annonce et choix de l'angle de candidature"))
+            val (prepModel, prepNoThink) = charger(AgentRole.ANALYSIS, settings)
+            send(PipelineEvent.Modele(prepModel))
 
-            val analyse = runtime.generateJson(
-                serializer = JobAnalysis.serializer(),
-                system = Prompts.analysteSystem,
-                user = Prompts.analysteUser(offre),
-                params = GenerationParams.precise(maxTokens = 1200),
-                suppressReasoning = analyseNoThink,
-                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
+            val digest = digestAdapte(profile, settings)
+            val dossier = runtime.generateJson(
+                serializer = DossierPreparation.serializer(),
+                system = Prompts.preparationSystem,
+                user = Prompts.preparationUser(offre, digest.texte),
+                params = GenerationParams.precise(maxTokens = 1800),
+                suppressReasoning = prepNoThink,
+                onLecturePrompt = { lus, t, ms -> trySend(PipelineEvent.Lecture(lus, t, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
             )
+            val analyse = dossier.analyse
             if (analyse.annonceIncomplete) {
                 send(PipelineEvent.Avertissement(
                     "Annonce peu detaillee : l'analyse a complete avec ce que ce metier " +
@@ -94,152 +98,42 @@ class Orchestrator(
             }
 
             val langue = langueSortie(settings, analyse)
+            val strategie = remapperIdentifiants(dossier.strategie, digest)
 
-            // ---------- 2. Strategie ----------
-            send(PipelineEvent.Etape(2, total, "Strategie de candidature",
-                "Choix de l'angle et des experiences a mettre en avant"))
-            val digest = digestAdapte(profile, settings)
-            val (strategieModel, strategieNoThink) = charger(AgentRole.STRATEGY, settings)
-            send(PipelineEvent.Modele(strategieModel))
-
-            val strategieBrute = runtime.generateJson(
-                serializer = Strategy.serializer(),
-                system = Prompts.strategeSystem,
-                user = Prompts.strategeUser(analyse, digest.texte),
-                params = GenerationParams.precise(maxTokens = 1400),
-                suppressReasoning = strategieNoThink,
-                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
-                onToken = { trySend(PipelineEvent.Jeton(it)) },
-            )
-            val strategie = remapperIdentifiants(strategieBrute, digest)
-
-            // ---------- 3. Redaction du CV ----------
-            send(PipelineEvent.Etape(3, total, "Redaction du CV",
-                "Reecriture des experiences pour cette offre precise"))
+            // ---------- 2. Redaction du CV et de la lettre ----------
+            send(PipelineEvent.Etape(2, total, "Redaction",
+                "Ecriture du CV et de la lettre de motivation"))
             val (redactionModel, redactionNoThink) = charger(AgentRole.WRITING, settings)
             send(PipelineEvent.Modele(redactionModel))
 
-            var cv = runtime.generateJson(
-                serializer = CvContent.serializer(),
-                system = Prompts.redacteurCvSystem,
-                user = Prompts.redacteurCvUser(analyse, strategie, digest.texte, langue, settings.cvUnePage),
-                params = GenerationParams.writing(maxTokens = 2200),
-                suppressReasoning = redactionNoThink,
-                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
-                onToken = { trySend(PipelineEvent.Jeton(it)) },
-            ).let { completerDepuisProfil(it, profile, langue) }
-
-            // ---------- 4. Redaction de la lettre ----------
-            send(PipelineEvent.Etape(4, total, "Redaction de la lettre",
-                "Lettre de motivation adaptee au poste"))
-            var lettre = runtime.generateJson(
-                serializer = LetterContent.serializer(),
-                system = Prompts.redacteurLettreSystem,
-                user = Prompts.redacteurLettreUser(
+            val rediges = runtime.generateJson(
+                serializer = DocumentsRediges.serializer(),
+                system = Prompts.redactionSystem,
+                user = Prompts.redactionUser(
                     analyse, strategie, digest.texte,
-                    profile.identite.nomComplet, langue, profile.recherche.disponibilite,
+                    profile.identite.nomComplet, langue,
+                    profile.recherche.disponibilite, settings.cvUnePage,
                 ),
-                params = GenerationParams.writing(maxTokens = 1600),
+                params = GenerationParams.writing(maxTokens = 3200),
                 suppressReasoning = redactionNoThink,
-                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
+                onLecturePrompt = { lus, t, ms -> trySend(PipelineEvent.Lecture(lus, t, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
-            ).let { completerLettre(it, profile, analyse, langue) }
+            )
+
+            var cv = completerDepuisProfil(rediges.cv, profile, langue)
+            var lettre = completerLettre(rediges.lettre, profile, analyse, langue)
 
             var revue = Review()
 
             if (relecture) {
-                // ---------- 5. Relecture ----------
-                send(PipelineEvent.Etape(5, total, "Relecture critique",
-                    "Recherche d'inventions, d'oublis et de maladresses"))
-                val (relectureModel, relectureNoThink) = charger(AgentRole.REVIEW, settings)
-                send(PipelineEvent.Modele(relectureModel))
-
-                val revueIa = runtime.generateJson(
-                    serializer = Review.serializer(),
-                    system = Prompts.relecteurSystem,
-                    user = Prompts.relecteurUser(
-                        analyse, digest.texte, cv.texteIntegral(), lettre.texteIntegral(),
-                    ),
-                    params = GenerationParams.precise(maxTokens = 1400),
-                    suppressReasoning = relectureNoThink,
-                    onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
-                onToken = { trySend(PipelineEvent.Jeton(it)) },
-                )
-
-                // Les controles mecaniques passent apres l'IA et la completent :
-                // ils ne ratent jamais un employeur ou un chiffre inconnu.
-                val rapport = FactCheck.verifier(profile, analyse, cv, lettre)
-                revue = fusionner(revueIa, rapport)
-
-                if (rapport.aDesAlertes) {
-                    send(PipelineEvent.Avertissement(
-                        "Verification automatique : " +
-                            listOfNotNull(
-                                rapport.organisationsSuspectes.takeIf { it.isNotEmpty() }
-                                    ?.let { "organisations absentes du profil (${it.joinToString(", ")})" },
-                                rapport.chiffresSuspects.takeIf { it.isNotEmpty() }
-                                    ?.let { "chiffres non presents dans le profil (${it.joinToString(", ")})" },
-                            ).joinToString(" ; ") + ". Ils vont etre retires."
-                    ))
-                }
-
-                // ---------- 6. Correction ----------
-                val besoinCorrection = revue.faitsInventes.isNotEmpty() ||
-                    revue.problemes.any { it.gravite.lowercase() in setOf("bloquant", "important") } ||
-                    revue.scoreGlobal < 85
-
-                if (besoinCorrection && settings.passesCorrection > 0) {
-                    send(PipelineEvent.Etape(6, total, "Correction",
-                        "Application des corrections de la relecture"))
-                    val (correctionModel, correctionNoThink) = charger(AgentRole.WRITING, settings)
-                    send(PipelineEvent.Modele(correctionModel))
-
-                    repeat(min(settings.passesCorrection, 2)) { passe ->
-                        val cvCorrige = runCatching {
-                            runtime.generateJson(
-                                serializer = CvContent.serializer(),
-                                system = Prompts.redacteurCvSystem,
-                                user = Prompts.correctionCvUser(
-                                    analyse, strategie, digest.texte,
-                                    prettyJson.encodeToString(cv), revue, langue,
-                                ),
-                                params = GenerationParams.writing(maxTokens = 2200),
-                                suppressReasoning = correctionNoThink,
-                                onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
-                onToken = { trySend(PipelineEvent.Jeton(it)) },
-                            )
-                        }.getOrNull()
-                        if (cvCorrige != null) cv = completerDepuisProfil(cvCorrige, profile, langue)
-
-                        if (revue.problemes.any { it.zone.contains("lettre", true) } ||
-                            revue.faitsInventes.isNotEmpty()
-                        ) {
-                            val lettreCorrigee = runCatching {
-                                runtime.generateJson(
-                                    serializer = LetterContent.serializer(),
-                                    system = Prompts.redacteurLettreSystem,
-                                    user = Prompts.correctionLettreUser(
-                                        analyse, digest.texte,
-                                        prettyJson.encodeToString(lettre), revue, langue,
-                                    ),
-                                    params = GenerationParams.writing(maxTokens = 1600),
-                                    suppressReasoning = correctionNoThink,
-                                    onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
-                onToken = { trySend(PipelineEvent.Jeton(it)) },
-                                )
-                            }.getOrNull()
-                            if (lettreCorrigee != null) {
-                                lettre = completerLettre(lettreCorrigee, profile, analyse, langue)
-                            }
-                        }
-
-                        // Nouvelle verification mecanique apres correction.
-                        val rapport2 = FactCheck.verifier(profile, analyse, cv, lettre)
-                        revue = fusionner(revue.copy(faitsInventes = emptyList()), rapport2)
-                        if (!rapport2.aDesAlertes) return@repeat
-                        Log.i(TAG, "Passe de correction ${passe + 1} : alertes restantes")
-                    }
-                }
+                val etapes = relireEtCorriger(
+                    profile, settings, analyse, strategie, digest, langue, cv, lettre,
+                    premiereEtape = 3, total = total,
+                ) { trySend(it) }
+                cv = etapes.cv
+                lettre = etapes.lettre
+                revue = etapes.revue
+                etapes.avertissement?.let { send(PipelineEvent.Avertissement(it)) }
             }
 
             val rapportFinal = FactCheck.verifier(profile, analyse, cv, lettre)
@@ -267,6 +161,163 @@ class Orchestrator(
             Log.e(TAG, "Echec du pipeline", e)
             send(PipelineEvent.Echec(e.message ?: "Erreur inattendue"))
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Relecture et correction
+    //
+    // Sorties du chemin par defaut : ce sont les deux etapes les plus chere du
+    // pipeline -- elles relisent le CV, la lettre, l'annonce et le profil, puis
+    // reecrivent tout -- pour un resultat que l'on relit de toute facon
+    // soi-meme. Elles restent disponibles a la demande, sur une candidature
+    // deja produite.
+    // -----------------------------------------------------------------------
+
+    private data class Corrigee(
+        val cv: CvContent,
+        val lettre: LetterContent,
+        val revue: Review,
+        val avertissement: String? = null,
+    )
+
+    /** Relit une candidature deja ecrite et applique les corrections. */
+    fun verifierCandidature(
+        candidature: Candidature,
+        profile: Profile,
+        settings: Settings,
+    ): Flow<PipelineEvent> = channelFlow {
+        try {
+            val digest = digestAdapte(profile, settings)
+            val langue = candidature.cv.langue.ifBlank { "fr" }
+            val resultat = relireEtCorriger(
+                profile, settings, candidature.analyse, candidature.strategie, digest,
+                langue, candidature.cv, candidature.lettre,
+                premiereEtape = 1, total = 2,
+            ) { trySend(it) }
+            resultat.avertissement?.let { send(PipelineEvent.Avertissement(it)) }
+
+            val rapport = FactCheck.verifier(profile, candidature.analyse, resultat.cv, resultat.lettre)
+            send(PipelineEvent.CandidaturePrete(
+                candidature.copy(
+                    cv = resultat.cv,
+                    lettre = resultat.lettre,
+                    revue = resultat.revue,
+                    scoreAts = rapport.scoreAts,
+                    modifieLe = System.currentTimeMillis(),
+                )
+            ))
+        } catch (e: Exception) {
+            Log.e(TAG, "Echec de la verification", e)
+            send(PipelineEvent.Echec(e.message ?: "Erreur inattendue"))
+        }
+    }
+
+    private suspend fun relireEtCorriger(
+        profile: Profile,
+        settings: Settings,
+        analyse: JobAnalysis,
+        strategie: Strategy,
+        digest: ProfileDigest,
+        langue: String,
+        cvInitial: CvContent,
+        lettreInitiale: LetterContent,
+        premiereEtape: Int,
+        total: Int,
+        emettre: (PipelineEvent) -> Unit,
+    ): Corrigee {
+        var cv = cvInitial
+        var lettre = lettreInitiale
+
+        emettre(PipelineEvent.Etape(premiereEtape, total, "Relecture critique",
+            "Recherche d'inventions, d'oublis et de maladresses"))
+        val (relectureModel, relectureNoThink) = charger(AgentRole.REVIEW, settings)
+        emettre(PipelineEvent.Modele(relectureModel))
+
+        val revueIa = runtime.generateJson(
+            serializer = Review.serializer(),
+            system = Prompts.relecteurSystem,
+            user = Prompts.relecteurUser(
+                analyse, digest.texte, cv.texteIntegral(), lettre.texteIntegral(),
+            ),
+            params = GenerationParams.precise(maxTokens = 1400),
+            suppressReasoning = relectureNoThink,
+            onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
+            onToken = { emettre(PipelineEvent.Jeton(it)) },
+        )
+
+        // Les controles mecaniques passent apres l'IA et la completent : ils ne
+        // ratent jamais un employeur, un diplome ou un chiffre inconnu.
+        val rapport = FactCheck.verifier(profile, analyse, cv, lettre)
+        var revue = fusionner(revueIa, rapport)
+
+        val avertissement = if (rapport.aDesAlertes) {
+            "Verification automatique : " + listOfNotNull(
+                rapport.organisationsSuspectes.takeIf { it.isNotEmpty() }
+                    ?.let { "organisations absentes du profil (${it.joinToString(", ")})" },
+                rapport.diplomesSuspects.takeIf { it.isNotEmpty() }
+                    ?.let { "diplomes absents du profil (${it.joinToString(", ")})" },
+                rapport.chiffresSuspects.takeIf { it.isNotEmpty() }
+                    ?.let { "chiffres non presents dans le profil (${it.joinToString(", ")})" },
+            ).joinToString(" ; ") + ". Ils vont etre retires."
+        } else null
+
+        val besoinCorrection = revue.faitsInventes.isNotEmpty() ||
+            revue.problemes.any { it.gravite.lowercase() in setOf("bloquant", "important") } ||
+            revue.scoreGlobal < 85
+
+        if (besoinCorrection && settings.passesCorrection > 0) {
+            emettre(PipelineEvent.Etape(premiereEtape + 1, total, "Correction",
+                "Application des corrections de la relecture"))
+            val (correctionModel, correctionNoThink) = charger(AgentRole.WRITING, settings)
+            emettre(PipelineEvent.Modele(correctionModel))
+
+            repeat(min(settings.passesCorrection, 2)) { passe ->
+                val cvCorrige = runCatching {
+                    runtime.generateJson(
+                        serializer = CvContent.serializer(),
+                        system = Prompts.redacteurCvSystem,
+                        user = Prompts.correctionCvUser(
+                            analyse, strategie, digest.texte,
+                            prettyJson.encodeToString(cv), revue, langue,
+                        ),
+                        params = GenerationParams.writing(maxTokens = 2200),
+                        suppressReasoning = correctionNoThink,
+                        onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
+                        onToken = { emettre(PipelineEvent.Jeton(it)) },
+                    )
+                }.getOrNull()
+                if (cvCorrige != null) cv = completerDepuisProfil(cvCorrige, profile, langue)
+
+                if (revue.problemes.any { it.zone.contains("lettre", true) } ||
+                    revue.faitsInventes.isNotEmpty()
+                ) {
+                    val lettreCorrigee = runCatching {
+                        runtime.generateJson(
+                            serializer = LetterContent.serializer(),
+                            system = Prompts.redacteurLettreSystem,
+                            user = Prompts.correctionLettreUser(
+                                analyse, digest.texte,
+                                prettyJson.encodeToString(lettre), revue, langue,
+                            ),
+                            params = GenerationParams.writing(maxTokens = 1600),
+                            suppressReasoning = correctionNoThink,
+                            onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
+                            onToken = { emettre(PipelineEvent.Jeton(it)) },
+                        )
+                    }.getOrNull()
+                    if (lettreCorrigee != null) {
+                        lettre = completerLettre(lettreCorrigee, profile, analyse, langue)
+                    }
+                }
+
+                val rapport2 = FactCheck.verifier(profile, analyse, cv, lettre)
+                revue = fusionner(revue.copy(faitsInventes = emptyList()), rapport2)
+                if (!rapport2.aDesAlertes) return@repeat
+                Log.i(TAG, "Passe de correction ${passe + 1} : alertes restantes")
+            }
+        }
+
+        return Corrigee(cv, lettre, revue, avertissement)
     }
 
     // -----------------------------------------------------------------------
@@ -371,6 +422,23 @@ class Orchestrator(
      * frequents. L'identite n'est jamais generee : elle est injectee au rendu.
      */
     private fun completerDepuisProfil(cv: CvContent, profile: Profile, langue: String): CvContent {
+        // Les formations ne viennent JAMAIS du modele. Sur une annonce exigeant
+        // un diplome que le candidat n'a pas, il recopiait l'exigence dans les
+        // formations : un faux diplome d'Etat, verifiable en un appel. Aucune
+        // consigne ne resiste durablement a cette tentation, alors on ne la lui
+        // laisse pas -- les formations sont recopiees du profil, telles quelles.
+        val formations = profile.formations.map { f ->
+            com.jobmaker.data.model.CvFormation(
+                diplome = f.diplome,
+                etablissement = f.etablissement,
+                lieu = f.lieu,
+                periode = f.periode,
+                detail = listOfNotNull(
+                    f.mention.takeIf { it.isNotBlank() },
+                    f.matieres.takeIf { it.isNotEmpty() }?.joinToString(", "),
+                ).joinToString(" - "),
+            )
+        }
         val langues = cv.langues.ifEmpty {
             profile.langues.map { com.jobmaker.data.model.CvLangue(it.nom, it.niveau) }
         }
@@ -390,6 +458,7 @@ class Orchestrator(
         return cv.copy(
             langue = langue,
             titre = cv.titre.ifBlank { profile.identite.titre.ifBlank { profile.recherche.posteVise } },
+            formations = formations,
             langues = langues,
             certifications = certifs,
             infosComplementaires = infos,
@@ -436,6 +505,12 @@ class Orchestrator(
                     "Le chiffre \"$it\" n'apparait pas dans le profil",
                     "Supprimer ce chiffre ou le remplacer par une formulation sans chiffre"))
             }
+            rapport.diplomesSuspects.forEach {
+                add(Probleme("bloquant", "formation",
+                    "Le diplome \"$it\" ne figure pas dans votre profil",
+                    "Le retirer. Annoncer un diplome que l'on n'a pas est verifiable " +
+                        "et disqualifie la candidature"))
+            }
             if (rapport.premierePersonneDansCv) {
                 add(Probleme("important", "accroche",
                     "Le CV emploie la premiere personne",
@@ -455,7 +530,8 @@ class Orchestrator(
 
         val inventes = (revue.faitsInventes +
             rapport.organisationsSuspectes.map { "Organisation inconnue : $it" } +
-            rapport.chiffresSuspects.map { "Chiffre inconnu : $it" }).distinct()
+            rapport.chiffresSuspects.map { "Chiffre inconnu : $it" } +
+            rapport.diplomesSuspects.map { "Diplome inconnu : $it" }).distinct()
 
         val score = if (inventes.isNotEmpty()) min(revue.scoreGlobal, 55) else revue.scoreGlobal
 

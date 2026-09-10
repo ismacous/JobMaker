@@ -130,10 +130,12 @@ fun ReglagesScreen(
             SectionCarte("Qualite de la generation") {
                 LigneInterrupteur(
                     titre = "Relecture automatique",
-                    detail = "Une etape supplementaire cherche les inventions, les oublis de " +
-                        "mots-cles et les maladresses, puis corrige. Double le temps de " +
-                        "generation, mais c'est ce qui empeche un CV de contenir un employeur " +
-                        "ou un chiffre que vous n'avez jamais donne. A laisser active.",
+                    detail = "Deux etapes supplementaires relisent le CV et la lettre, puis " +
+                        "les reecrivent. Elles doublent le temps de generation. Desactivees " +
+                        "par defaut : les controles automatiques (employeur, diplome ou " +
+                        "chiffre absent du profil) tournent de toute facon, et le bouton " +
+                        "\"Relire\" sur une candidature terminee fait la meme chose quand " +
+                        "vous le decidez.",
                     valeur = reglages.relectureActive,
                     onChange = vm::setRelecture,
                 )

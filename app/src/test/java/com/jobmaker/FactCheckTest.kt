@@ -156,4 +156,57 @@ class FactCheckTest {
     fun `la normalisation ignore accents, casse et ponctuation`() {
         assertEquals("cafe du coin", FactCheck.normaliser("Café  du  Coin !"))
     }
+
+    // -- le diplome exige par l'annonce, recopie dans le CV --------------------
+    // Cas reellement survenu : l'annonce exigeait un diplome d'Etat de
+    // travailleur social, le candidat ne l'avait pas, et le CV produit
+    // l'annoncait quand meme. C'est un faux, verifiable en un appel.
+
+    @Test
+    fun `un diplome absent du profil est signale`() {
+        val cvMenteur = cvFidele.copy(
+            formations = listOf(
+                CvFormation(
+                    diplome = "Diplome d'Etat d'Assistant de Service Social",
+                    etablissement = "Lycee Baggio",
+                )
+            )
+        )
+        val rapport = FactCheck.verifier(profil, offre, cvMenteur, LetterContent())
+        assertTrue(
+            "Le diplome invente doit etre signale",
+            rapport.diplomesSuspects.any { it.contains("Assistant de Service Social") },
+        )
+        assertTrue(rapport.aDesAlertes)
+    }
+
+    @Test
+    fun `le diplome reellement declare ne declenche rien`() {
+        val rapport = FactCheck.verifier(profil, offre, cvFidele, LetterContent())
+        assertEquals(emptyList<String>(), rapport.diplomesSuspects)
+    }
+
+    @Test
+    fun `une reformulation du meme diplome reste acceptee`() {
+        val cv = cvFidele.copy(
+            formations = listOf(CvFormation(diplome = "Bac professionnel logistique"))
+        )
+        val rapport = FactCheck.verifier(profil, offre, cv, LetterContent())
+        assertEquals(
+            "Un intitule reformule ne doit pas passer pour un faux",
+            emptyList<String>(), rapport.diplomesSuspects,
+        )
+    }
+
+    @Test
+    fun `un diplome de niveau superieur au profil est signale`() {
+        val cv = cvFidele.copy(
+            formations = listOf(CvFormation(diplome = "Licence professionnelle logistique"))
+        )
+        val rapport = FactCheck.verifier(profil, offre, cv, LetterContent())
+        assertTrue(
+            "Une licence n'est pas une reformulation d'un bac pro, meme domaine",
+            rapport.diplomesSuspects.any { it.contains("Licence") },
+        )
+    }
 }

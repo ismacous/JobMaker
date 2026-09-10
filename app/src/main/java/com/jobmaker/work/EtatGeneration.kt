@@ -14,7 +14,7 @@ enum class PhaseGeneration(val libelle: String) {
 data class EtatGeneration(
     val enCours: Boolean = false,
     val etapeIndex: Int = 0,
-    val etapesTotal: Int = 6,
+    val etapesTotal: Int = 2,
     val etapeTitre: String = "",
     val etapeDetail: String = "",
     val modeleActuel: String = "",

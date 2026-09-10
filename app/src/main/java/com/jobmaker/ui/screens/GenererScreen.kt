@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -242,6 +243,30 @@ fun GenererScreen(
 private fun ProgressionGeneration(vm: GenerateViewModel) {
     val etat by vm.etat.collectAsState()
 
+    // Une generation represente plusieurs minutes de calcul : un appui
+    // involontaire ne doit pas pouvoir les effacer.
+    var demandeInterruption by remember { mutableStateOf(false) }
+    if (demandeInterruption) {
+        AlertDialog(
+            onDismissRequest = { demandeInterruption = false },
+            title = { Text("Interrompre la generation ?") },
+            text = {
+                Text(
+                    "Le travail deja fait sera perdu et il faudra tout recommencer " +
+                        "depuis le debut."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { demandeInterruption = false; vm.annuler() }) {
+                    Text("Interrompre")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { demandeInterruption = false }) { Text("Continuer") }
+            },
+        )
+    }
+
     // Horloge qui avance : sans elle, impossible de savoir si le modele
     // travaille ou si l'application est bloquee.
     var maintenant by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -384,7 +409,7 @@ private fun ProgressionGeneration(vm: GenerateViewModel) {
         }
 
         OutlinedButton(
-            onClick = { vm.annuler() },
+            onClick = { demandeInterruption = true },
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
         ) { Text("Interrompre") }
     }

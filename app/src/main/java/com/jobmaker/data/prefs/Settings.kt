@@ -35,7 +35,14 @@ data class Settings(
     val couleurAccent: String = "#1F4E79",
     val photoSurCv: Boolean = false,
     /** Passe de relecture automatique + correction. Double le temps mais evite les betises. */
-    val relectureActive: Boolean = true,
+    /**
+     * Relecture critique puis correction par le modele. Desactivee par defaut :
+     * ce sont les deux etapes les plus cheres du pipeline -- elles relisent le
+     * CV, la lettre, l'annonce et le profil, puis reecrivent tout -- et elles
+     * doublaient a elles seules le temps de generation. Disponibles a la
+     * demande sur une candidature deja produite.
+     */
+    val relectureActive: Boolean = false,
     val passesCorrection: Int = 1,
     val langueSortie: LangueSortie = LangueSortie.AUTO,
     val cvUnePage: Boolean = true,
@@ -61,7 +68,7 @@ class SettingsRepository(private val context: Context) {
             gabaritParDefaut = this[KEY_GABARIT] ?: "sobre",
             couleurAccent = this[KEY_COULEUR] ?: "#1F4E79",
             photoSurCv = this[KEY_PHOTO] ?: false,
-            relectureActive = this[KEY_RELECTURE] ?: true,
+            relectureActive = this[KEY_RELECTURE] ?: false,
             passesCorrection = this[KEY_PASSES] ?: 1,
             langueSortie = runCatching {
                 LangueSortie.valueOf(this[KEY_LANGUE] ?: LangueSortie.AUTO.name)
