@@ -170,7 +170,11 @@ object ProfileSerializer {
             }
             if (lignes.isNotEmpty()) {
                 sb.appendLine()
-                sb.appendLine("CONTEXTE DE RECHERCHE (ne s'imprime pas sur le CV)")
+                sb.appendLine(
+                    "CONTEXTE DE RECHERCHE DU CANDIDAT -- CE QU'IL CHERCHE EN GENERAL, " +
+                        "PAS CETTE OFFRE. Sert a choisir l'angle. Ne jamais recopier dans " +
+                        "le CV ni dans la lettre."
+                )
                 lignes.forEach { sb.appendLine("  - $it") }
             }
         }

@@ -163,6 +163,25 @@ data class DossierPreparation(
  * contexte -- plusieurs minutes sur un telephone.
  */
 /**
+ * Ce que la generation doit produire.
+ *
+ * Chaque document se paie en tokens ecrits, et sur un telephone un token coute
+ * environ deux dixiemes de seconde : la lettre en demande 550, le CV 900. Ne
+ * demander que ce dont on a besoin est donc la facon la plus directe de gagner
+ * du temps -- et la seule qui ne coute rien en qualite, puisqu'elle ne retire
+ * rien a ce qui est produit.
+ */
+enum class SortieVoulue(val libelle: String, val detail: String) {
+    LES_DEUX("CV + lettre", "Les deux documents"),
+    CV_SEUL("CV seul", "Environ deux minutes de moins"),
+    LETTRE_SEULE("Lettre seule", "Environ trois minutes de moins"),
+    ;
+
+    val veutCv: Boolean get() = this != LETTRE_SEULE
+    val veutLettre: Boolean get() = this != CV_SEUL
+}
+
+/**
  * Sortie de l'appel unique : tout ce qu'une candidature demande, produit d'une
  * traite.
  *

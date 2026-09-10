@@ -23,6 +23,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -52,6 +53,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.jobmaker.data.model.SortieVoulue
 import com.jobmaker.llm.CompteursSysteme
 import com.jobmaker.ui.components.Bandeau
 import com.jobmaker.ui.components.SectionCarte
@@ -83,6 +85,7 @@ fun GenererScreen(
         }
     }
     val etat by vm.etat.collectAsState()
+    val sortie by vm.sortie.collectAsState()
     val profil by vm.profile.collectAsState()
     val modeles by vm.modelesInstalles.collectAsState()
     val presse = LocalClipboardManager.current
@@ -183,6 +186,30 @@ fun GenererScreen(
 
             Spacer(Modifier.height(12.dp))
 
+            // --- ce qu'on demande ---
+            if (!etat.enCours) {
+                Text("Documents a produire", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                        .padding(top = 4.dp, bottom = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    SortieVoulue.entries.forEach { choix ->
+                        FilterChip(
+                            selected = sortie == choix,
+                            onClick = { vm.majSortie(choix) },
+                            label = { Text(choix.libelle) },
+                        )
+                    }
+                }
+                Text(
+                    sortie.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 10.dp),
+                )
+            }
+
             // --- lancement ---
             if (!etat.enCours) {
                 Button(
@@ -197,7 +224,7 @@ fun GenererScreen(
                     enabled = offre.isNotBlank() && modeles.isNotEmpty(),
                 ) {
                     Icon(Icons.Default.AutoAwesome, null, Modifier.size(20.dp))
-                    Text("  Generer mon CV et ma lettre")
+                    Text("  Generer : ${sortie.libelle}")
                 }
                 Text(
                     "Tout se passe sur le telephone, et un telephone ecrit lentement : " +

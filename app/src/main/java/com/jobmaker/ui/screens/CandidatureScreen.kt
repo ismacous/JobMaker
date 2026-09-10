@@ -173,6 +173,7 @@ fun CandidatureScreen(
                 0 -> OngletCv(
                     vm = vm,
                     onEditer = onEditerCv,
+                    onRegenerer = { onRegenerer(c.offreTexte) },
                     onImprimer = {
                         if (activity == null) scope.launch {
                             snackbar.showSnackbar("Impression indisponible sur cet ecran.")
@@ -186,6 +187,7 @@ fun CandidatureScreen(
                 1 -> OngletLettre(
                     vm = vm,
                     onEditer = onEditerLettre,
+                    onRegenerer = { onRegenerer(c.offreTexte) },
                     onImprimer = {
                         if (activity == null) scope.launch {
                             snackbar.showSnackbar("Impression indisponible sur cet ecran.")
@@ -211,12 +213,24 @@ private fun OngletCv(
     onEditer: () -> Unit,
     onImprimer: () -> Unit,
     onPartagerTexte: () -> Unit,
+    onRegenerer: () -> Unit,
     exportEnCours: Boolean,
 ) {
     val candidature by vm.courante.collectAsState()
     val c = candidature ?: return
     val presse = LocalClipboardManager.current
     val gabarit = CvTemplates.byId(c.gabarit)
+
+    if (c.cv.experiences.isEmpty() && c.cv.accroche.isBlank()) {
+        DocumentAbsent(
+            "Cette candidature n'a pas de CV",
+            "Vous aviez demande \"Lettre seule\". Relancez la generation en choisissant " +
+                "\"CV + lettre\" ou \"CV seul\" : les consignes et votre profil sont deja " +
+                "en cache, seule l'annonce sera relue.",
+            onRegenerer,
+        )
+        return
+    }
 
     Column(Modifier.fillMaxSize()) {
         // --- barre d'actions ---
@@ -230,7 +244,7 @@ private fun OngletCv(
             }
             OutlinedButton(onClick = onEditer) {
                 Icon(Icons.Default.Edit, null, Modifier.size(18.dp))
-                Text("  Modifier")
+                Text("  Modifier le texte")
             }
             OutlinedButton(onClick = {
                 presse.setText(AnnotatedString(vm.texteCvPourCopie()))
@@ -306,15 +320,54 @@ private fun OngletCv(
     }
 }
 
+/**
+ * Ce qui s'affiche a la place d'un document qui n'a pas ete demande.
+ *
+ * Un onglet vide laisserait croire a un echec de generation. Celui-ci dit ce
+ * qui s'est passe, et propose la seule action utile.
+ */
+@Composable
+private fun DocumentAbsent(titre: String, explication: String, onRegenerer: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(titre, style = MaterialTheme.typography.titleMedium)
+        Text(
+            explication,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+        )
+        Button(onClick = onRegenerer) { Text("Relancer la generation") }
+    }
+}
+
 @Composable
 private fun OngletLettre(
     vm: DocumentsViewModel,
     onEditer: () -> Unit,
+    onRegenerer: () -> Unit,
     onImprimer: () -> Unit,
     onPartagerTexte: () -> Unit,
     exportEnCours: Boolean,
 ) {
+    val candidature by vm.courante.collectAsState()
+    val c = candidature ?: return
     val presse = LocalClipboardManager.current
+
+    if (c.lettre.paragraphes.isEmpty()) {
+        DocumentAbsent(
+            "Cette candidature n'a pas de lettre",
+            "Vous aviez demande \"CV seul\". Relancez la generation en choisissant " +
+                "\"CV + lettre\" ou \"Lettre seule\" : les consignes et votre profil sont " +
+                "deja en cache, seule l'annonce sera relue.",
+            onRegenerer,
+        )
+        return
+    }
+
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -326,7 +379,7 @@ private fun OngletLettre(
             }
             OutlinedButton(onClick = onEditer) {
                 Icon(Icons.Default.Edit, null, Modifier.size(18.dp))
-                Text("  Modifier")
+                Text("  Modifier le texte")
             }
             OutlinedButton(onClick = {
                 presse.setText(AnnotatedString(vm.texteLettrePourCopie()))

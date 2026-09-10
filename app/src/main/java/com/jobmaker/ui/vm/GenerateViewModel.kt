@@ -3,6 +3,7 @@ package com.jobmaker.ui.vm
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jobmaker.data.model.Candidature
+import com.jobmaker.data.model.SortieVoulue
 import com.jobmaker.di.AppContainer
 import com.jobmaker.work.EtatGeneration
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,9 @@ class GenerateViewModel(private val container: AppContainer) : ViewModel() {
     private val _offre = MutableStateFlow("")
     val offre: StateFlow<String> = _offre.asStateFlow()
 
+    private val _sortie = MutableStateFlow(SortieVoulue.LES_DEUX)
+    val sortie: StateFlow<SortieVoulue> = _sortie.asStateFlow()
+
     val etat: StateFlow<EtatGeneration> = moteur.etat
 
     val profile = container.profileRepository.profile
@@ -39,8 +43,12 @@ class GenerateViewModel(private val container: AppContainer) : ViewModel() {
 
     fun reinitialiser() = moteur.reinitialiser()
 
+    fun majSortie(valeur: SortieVoulue) {
+        _sortie.value = valeur
+    }
+
     fun lancer(candidatureExistante: Candidature? = null) {
-        moteur.lancer(_offre.value, candidatureExistante)
+        moteur.lancer(_offre.value, _sortie.value, candidatureExistante)
     }
 
     fun annuler() = moteur.annuler()

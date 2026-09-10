@@ -92,9 +92,11 @@ fun EditeurCvScreen(
                 .padding(horizontal = 12.dp),
         ) {
             Bandeau(
-                "Les modifications sont enregistrees au fur et a mesure. " +
-                    "Vos nom, telephone et adresse viennent de l'onglet Profil : " +
-                    "ils ne s'editent pas ici.",
+                "Vous modifiez le texte de CE CV, pas votre profil : tout ce qui suit " +
+                    "s'edite librement, s'ajoute et se supprime, et n'affecte que cette " +
+                    "candidature. Les modifications sont enregistrees au fur et a mesure.\n\n" +
+                    "Seuls le nom, le telephone et l'adresse sont repris du Profil et ne " +
+                    "s'editent pas ici.",
                 TypeBandeau.INFO,
             )
 

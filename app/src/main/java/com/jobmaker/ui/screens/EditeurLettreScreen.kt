@@ -83,8 +83,12 @@ fun EditeurLettreScreen(
                 .padding(horizontal = 12.dp),
         ) {
             Bandeau(
-                "Une lettre de 250 a 330 mots est lue jusqu'au bout. Au-dela de 400, elle est " +
-                    "survolee. Le compteur en haut a droite passe au vert dans la bonne plage.",
+                "Vous modifiez le texte de CETTE lettre, pas votre profil. Chaque paragraphe " +
+                    "se reecrit librement, se deplace, se supprime, et vous pouvez en ajouter. " +
+                    "Tout est enregistre au fur et a mesure.\n\n" +
+                    "Une lettre de 250 a 330 mots est lue jusqu'au bout ; au-dela de 400 elle " +
+                    "est survolee. Le compteur en haut a droite passe au vert dans la bonne " +
+                    "plage.",
                 TypeBandeau.INFO,
             )
 

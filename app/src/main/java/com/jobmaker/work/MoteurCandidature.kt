@@ -5,6 +5,7 @@ import android.util.Log
 import com.jobmaker.agents.Orchestrator
 import com.jobmaker.agents.PipelineEvent
 import com.jobmaker.data.model.Candidature
+import com.jobmaker.data.model.SortieVoulue
 import com.jobmaker.data.prefs.SettingsRepository
 import com.jobmaker.data.repo.CandidatureRepository
 import com.jobmaker.data.repo.ProfileRepository
@@ -56,7 +57,11 @@ class MoteurCandidature(
         _etat.value = EtatGeneration()
     }
 
-    fun lancer(offre: String, candidatureExistante: Candidature? = null) {
+    fun lancer(
+        offre: String,
+        sortie: SortieVoulue = SortieVoulue.LES_DEUX,
+        candidatureExistante: Candidature? = null,
+    ) {
         if (_etat.value.enCours) return
         travail?.cancel()
         _etat.value = EtatGeneration(
@@ -71,7 +76,7 @@ class MoteurCandidature(
                 val profil = profileRepository.get()
                 val reglages = settingsRepository.settings.first()
                 orchestrator
-                    .genererCandidature(offre, profil, reglages, candidatureExistante)
+                    .genererCandidature(offre, profil, reglages, sortie, candidatureExistante)
                     .collect { evenement -> appliquer(evenement) }
             } catch (t: CancellationException) {
                 // annuler() a deja pose l'etat ; et dans une coroutine annulee

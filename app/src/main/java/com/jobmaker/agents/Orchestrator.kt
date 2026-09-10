@@ -12,6 +12,7 @@ import com.jobmaker.data.model.LetterContent
 import com.jobmaker.data.model.Probleme
 import com.jobmaker.data.model.Profile
 import com.jobmaker.data.model.Review
+import com.jobmaker.data.model.SortieVoulue
 import com.jobmaker.data.model.Strategy
 import com.jobmaker.data.prefs.LangueSortie
 import com.jobmaker.data.prefs.Settings
@@ -69,6 +70,7 @@ class Orchestrator(
         offre: String,
         profile: Profile,
         settings: Settings,
+        sortie: SortieVoulue = SortieVoulue.LES_DEUX,
         candidatureExistante: Candidature? = null,
     ): Flow<PipelineEvent> = channelFlow {
         val relecture = settings.relectureActive
@@ -85,7 +87,7 @@ class Orchestrator(
             val produit = if (settings.analyseApprofondie) {
                 enDeuxTemps(offreUtile, profile, settings, total) { trySend(it) }
             } else {
-                enUnSeulAppel(offreUtile, profile, settings, total) { trySend(it) }
+                enUnSeulAppel(offreUtile, profile, settings, sortie, total) { trySend(it) }
             }
 
             val analyse = produit.dossier.analyse
@@ -99,8 +101,11 @@ class Orchestrator(
             val digest = produit.digest
             val langue = produit.langue
             val strategie = produit.dossier.strategie
-            var cv = completerDepuisProfil(produit.dossier.cv, profile, langue)
-            var lettre = completerLettre(produit.dossier.lettre, profile, analyse, langue)
+            var cv = if (sortie.veutCv) completerDepuisProfil(produit.dossier.cv, profile, langue)
+            else CvContent()
+            var lettre = if (sortie.veutLettre) {
+                completerLettre(produit.dossier.lettre, profile, analyse, langue)
+            } else LetterContent()
 
             var revue = Review()
 
@@ -166,11 +171,12 @@ class Orchestrator(
         offre: String,
         profile: Profile,
         settings: Settings,
+        sortie: SortieVoulue,
         total: Int,
         emettre: (PipelineEvent) -> Unit,
     ): Produit {
         emettre(PipelineEvent.Etape(1, total, "Redaction",
-            "Analyse de l'annonce, puis ecriture du CV et de la lettre"))
+            "Analyse de l'annonce, puis ecriture de ${sortie.libelle.lowercase()}"))
 
         // Le profil est mis en forme avant le chargement : sa taille reelle
         // decide de la fenetre a reserver, et donc de la memoire prise par le
@@ -183,7 +189,7 @@ class Orchestrator(
             settings,
             tokensPrompt = runtime.estimateTokens(Prompts.candidatureSystem) +
                 runtime.estimateTokens(offre) + runtime.estimateTokens(digest.texte),
-            budgetEcriture = MAX_APPEL_UNIQUE,
+            budgetEcriture = budgetPour(sortie),
         )
 
         val (modele, noThink) = charger(AgentRole.WRITING, settings, contexte)
@@ -201,9 +207,9 @@ class Orchestrator(
             system = Prompts.candidatureSystem,
             user = Prompts.candidatureUser(
                 offre, digest.texte, profile.identite.nomComplet, langue,
-                profile.recherche.disponibilite, settings.cvUnePage,
+                profile.recherche.disponibilite, settings.cvUnePage, sortie,
             ),
-            params = GenerationParams.writing(maxTokens = MAX_APPEL_UNIQUE),
+            params = GenerationParams.writing(maxTokens = budgetPour(sortie)),
             suppressReasoning = noThink,
             etape = "Candidature complete",
             cacheDePrompt = cache,
@@ -552,6 +558,18 @@ class Orchestrator(
      * Android le reprend en evincant les pages du modele, et chaque token
      * demande alors d'aller les relire sur le stockage.
      */
+    /**
+     * Budget d'ecriture selon ce qui est demande.
+     *
+     * L'analyse et l'angle sont ecrits dans tous les cas -- c'est ce qui permet
+     * au modele de viser juste -- puis s'ajoute ce qui a ete demande.
+     */
+    private fun budgetPour(sortie: SortieVoulue): Int = when (sortie) {
+        SortieVoulue.LES_DEUX -> MAX_APPEL_UNIQUE
+        SortieVoulue.CV_SEUL -> MAX_APPEL_UNIQUE - TOKENS_LETTRE
+        SortieVoulue.LETTRE_SEULE -> MAX_APPEL_UNIQUE - TOKENS_CV
+    }
+
     /** Le reglage effectif du moteur, pour que le bilan dise sur quoi il porte. */
     private fun detailMoteur(settings: Settings): String {
         val m = runtime.currentModel ?: return ""
@@ -700,6 +718,14 @@ class Orchestrator(
         return cv.copy(
             langue = langue,
             titre = cv.titre.ifBlank { profile.identite.titre.ifBlank { profile.recherche.posteVise } },
+            // Seuls les textes rediges par le modele sont assainis. Les champs
+            // que l'application compose elle-meme, eux, se servent du tiret pour
+            // separer deux informations : il n'y ponctue rien.
+            accroche = Typographie.assainir(cv.accroche),
+            experiences = cv.experiences.map { e ->
+                e.copy(puces = Typographie.assainir(e.puces))
+            },
+            projets = cv.projets.map { it.copy(description = Typographie.assainir(it.description)) },
             formations = formations,
             langues = langues,
             certifications = certifs,
@@ -714,6 +740,7 @@ class Orchestrator(
         langue: String,
     ): LetterContent = lettre.copy(
         langue = langue,
+        paragraphes = Typographie.assainir(lettre.paragraphes),
         objet = lettre.objet.ifBlank {
             if (langue == "en") "Application for the ${analyse.poste} position"
             else "Candidature au poste de ${analyse.poste}"
@@ -840,6 +867,10 @@ class Orchestrator(
          * reecrit. Le nom du fichier la porte, donc l'ancien est simplement
          * ignore puis efface.
          */
+        /** Ce que pese chaque document, mesure sur de vraies candidatures. */
+        const val TOKENS_CV = 900
+        const val TOKENS_LETTRE = 550
+
         const val VERSION_CACHE = 1
 
         // Mots outils tres frequents, et absents de l'autre langue. Ils suffisent

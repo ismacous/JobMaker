@@ -2,6 +2,7 @@ package com.jobmaker.agents
 
 import com.jobmaker.data.model.JobAnalysis
 import com.jobmaker.data.model.Review
+import com.jobmaker.data.model.SortieVoulue
 import com.jobmaker.data.model.Strategy
 
 /**
@@ -433,6 +434,22 @@ f. Ordre antichronologique. Les periodes gardent le format du profil, tu ne
    modifies aucune date.
 g. Pas de premiere personne, pas de superlatifs, pas de phrases d'ambiance.
 
+LE CONTRAT EST CELUI DE L'ANNONCE, JAMAIS CELUI DU PROFIL.
+La section "CONTEXTE DE RECHERCHE" du profil dit ce que le candidat cherche en
+general : type de contrat souhaite, duree ideale, secteurs vises, mobilite. Cela
+sert a choisir l'angle, et a rien d'autre. Ne le recopie jamais dans le CV ni
+dans la lettre.
+Une annonce pour trois jours de mission a laquelle on repond "je recherche un CDD
+de trois mois" est ecartee immediatement : le candidat n'a pas lu l'annonce. Si
+tu mentionnes une duree, un type de contrat ou une date de prise de poste, ce
+sont ceux que l'ANNONCE indique. Si l'annonce n'en indique aucun, n'en mentionne
+aucun.
+
+PONCTUATION. N'emploie jamais le tiret cadratin (—) ni le demi-cadratin (–), y
+compris comme incise. Ce signe n'existe pas sur un clavier francais et se
+reconnait immediatement comme une redaction automatique. La virgule, les
+deux-points et les parentheses font le meme travail.
+
 4. LA LETTRE - quatre paragraphes, 250 a 330 mots au total :
 a. VOUS - le besoin de l'entreprise tel qu'il ressort de l'annonce. Jamais
    "Je me permets de vous adresser ma candidature" : cette phrase fait fermer la lettre.
@@ -517,22 +534,44 @@ te servent a viser juste, pas a etre exhaustif.
         langue: String,
         disponibilite: String,
         unePage: Boolean,
+        sortie: SortieVoulue,
     ) = """
 --- PROFIL DU CANDIDAT (seule source de faits) ---
 $profil
 
 Signature a utiliser : $nomComplet
-${if (disponibilite.isNotBlank()) "Disponibilite declaree : $disponibilite" else ""}
+${if (disponibilite.isNotBlank()) "Disponibilite declaree par le candidat (a ne mentionner que si l'annonce parle de date de prise de poste) : $disponibilite" else ""}
 --- FIN DU PROFIL ---
 
 --- ANNONCE ---
 ${offre.trim()}
 --- FIN DE L'ANNONCE ---
 
-Analyse l'annonce, choisis l'angle, puis redige le CV et la lettre en ${langueLabel(langue)}.
-${if (unePage) "Contrainte : le CV doit tenir sur UNE page. Sois selectif." else ""}
-Les deux champs "langue" de ta reponse doivent valoir "$langue".
+Analyse l'annonce, choisis l'angle, puis redige en ${langueLabel(langue)}.
+${if (unePage && sortie.veutCv) "Contrainte : le CV doit tenir sur UNE page. Sois selectif." else ""}
+Les champs "langue" de ta reponse doivent valoir "$langue".
+${consigneSortie(sortie)}
 """.trimIndent()
+
+    /**
+     * La consigne de sortie est le dernier mot du prompt, volontairement.
+     *
+     * Un modele de quelques milliards de parametres suit d'autant mieux une
+     * regle qu'elle est proche de l'endroit ou il commence a ecrire. Placee
+     * plus haut, entre les consignes generales, elle se fait oublier -- et un
+     * document qu'on ne voulait pas coute deux minutes.
+     */
+    private fun consigneSortie(sortie: SortieVoulue): String = when (sortie) {
+        SortieVoulue.LES_DEUX ->
+            "Tu produis les deux documents : \"cv\" et \"lettre\" sont remplis."
+        SortieVoulue.CV_SEUL ->
+            "TU NE PRODUIS QUE LE CV. Le champ \"lettre\" doit valoir exactement {} : " +
+                "n'ecris aucun paragraphe, aucune formule, aucun objet. Tout mot ecrit " +
+                "dans \"lettre\" est du temps perdu."
+        SortieVoulue.LETTRE_SEULE ->
+            "TU NE PRODUIS QUE LA LETTRE. Le champ \"cv\" doit valoir exactement {} : " +
+                "n'ecris ni titre, ni accroche, ni experience. Tout mot ecrit dans " +
+                "\"cv\" est du temps perdu."
 
     // -----------------------------------------------------------------------
     // Etape 2 fusionnee : CV ET lettre
@@ -555,6 +594,17 @@ LE CV. Tu es specialiste du marche francais et des logiciels de tri de candidatu
 6. Ordre antichronologique. Les periodes gardent le format du profil, tu ne modifies
    aucune date.
 7. Pas de premiere personne, pas de superlatifs, pas de phrases d'ambiance.
+
+LE CONTRAT EST CELUI DE L'ANNONCE, JAMAIS CELUI DU PROFIL. La section
+"CONTEXTE DE RECHERCHE" du profil dit ce que le candidat cherche en general :
+elle sert a choisir l'angle, jamais a etre recopiee. Repondre "je recherche un
+CDD de trois mois" a une annonce de trois jours fait ecarter le dossier. Duree,
+type de contrat et date de prise de poste sont ceux de l'ANNONCE, ou ne sont pas
+mentionnes.
+
+PONCTUATION. N'emploie jamais le tiret cadratin (—) ni le demi-cadratin (–) :
+ce signe n'existe pas sur un clavier francais et se reconnait immediatement
+comme une redaction automatique.
 
 LA LETTRE. Quatre paragraphes, 250 a 330 mots au total :
 1. VOUS - le besoin de l'entreprise tel qu'il ressort de l'annonce. Jamais
