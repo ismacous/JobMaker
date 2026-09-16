@@ -156,24 +156,40 @@ fun ReglagesScreen(
             // Qualite de generation
             // -----------------------------------------------------------------
             SectionCarte("Qualite de la generation") {
-                LigneInterrupteur(
-                    titre = "Relecture automatique",
-                    detail = "Deux etapes supplementaires relisent le CV et la lettre, puis " +
-                        "les reecrivent. Sur le moteur embarque elles doublent le temps de " +
-                        "generation, d'ou leur desactivation par defaut : les controles " +
-                        "automatiques (employeur, diplome ou chiffre absent du profil) " +
-                        "tournent de toute facon, et le bouton \"Relire\" sur une " +
-                        "candidature terminee fait la meme chose quand vous le decidez." +
-                        if (reglages.modeMoteur == ModeMoteur.CLOUD) {
-                            "\n\nEn mode API, elles ne coutent que quelques secondes : " +
-                                "elles sont donc appliquees a chaque generation, que cet " +
-                                "interrupteur soit actif ou non."
-                        } else "",
-                    valeur = reglages.relectureActive,
-                    onChange = vm::setRelecture,
-                )
+                if (reglages.modeMoteur == ModeMoteur.CLOUD) {
+                    LigneInterrupteur(
+                        titre = "Relecture automatique",
+                        detail = "Deux etapes supplementaires relisent le CV et la lettre, " +
+                            "puis les reecrivent. C'est ce qui separe un CV correct d'un " +
+                            "CV bon, et le calcul ne coute que quelques secondes.\n\n" +
+                            "A desactiver si le quota gratuit vous fait attendre : les " +
+                            "quotas se comptent en tokens par minute, et ces deux etapes " +
+                            "peuvent imposer une attente chacune. Les controles " +
+                            "automatiques (employeur, diplome ou chiffre absent du profil) " +
+                            "tournent de toute facon, et le bouton \"Relire\" sur une " +
+                            "candidature terminee refait le travail quand vous le decidez.",
+                        valeur = reglages.relectureCloud,
+                        onChange = vm::setRelectureCloud,
+                    )
+                } else {
+                    LigneInterrupteur(
+                        titre = "Relecture automatique",
+                        detail = "Deux etapes supplementaires relisent le CV et la lettre, " +
+                            "puis les reecrivent. Sur le moteur embarque elles doublent le " +
+                            "temps de generation, d'ou leur desactivation par defaut : les " +
+                            "controles automatiques (employeur, diplome ou chiffre absent " +
+                            "du profil) tournent de toute facon, et le bouton \"Relire\" " +
+                            "sur une candidature terminee fait la meme chose quand vous " +
+                            "le decidez.",
+                        valeur = reglages.relectureActive,
+                        onChange = vm::setRelecture,
+                    )
+                }
 
-                if (reglages.relectureActive) {
+                val relectureActive =
+                    if (reglages.modeMoteur == ModeMoteur.CLOUD) reglages.relectureCloud
+                    else reglages.relectureActive
+                if (relectureActive) {
                     Text(
                         "Passes de correction : ${reglages.passesCorrection}",
                         style = MaterialTheme.typography.titleSmall,

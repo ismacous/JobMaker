@@ -56,10 +56,13 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
         messages: List<ChatMessage>,
         params: GenerationParams,
         onToken: ((String) -> Unit)? = null,
+        /** Prevenu quand l'appel patiente le temps que le quota se renouvelle. */
+        onAttente: ((secondes: Int) -> Unit)? = null,
     ): String {
         val modeleRetenu = modele.ifBlank { fournisseur.modeleParDefaut }
         var extras = true
         var tentative = 0
+        var attentes = 0
 
         // Boucle sans sortie normale : on quitte par un return ou une
         // exception. Le compilateur le sait, il ne reclame pas de valeur finale.
@@ -84,6 +87,24 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
                     delay(1000L * tentative * tentative)
                     continue
                 }
+
+                // Quota par minute epuise. La fenetre se reouvre en moins d'une
+                // minute et le fournisseur dit exactement quand : attendre est
+                // presque toujours meilleur que de basculer sur le modele du
+                // telephone, qui ecrit moins bien et met dix minutes. On ne
+                // renonce que si l'attente depasse le raisonnable, ou si elle
+                // se repete trop -- la, c'est le quota du jour, pas la minute.
+                if (e.code == 429 && attentes < MAX_ATTENTES) {
+                    val secondes = (e.attenteS ?: ATTENTE_PAR_DEFAUT).coerceAtMost(ATTENTE_MAX)
+                    if (e.attenteS == null || e.attenteS <= ATTENTE_MAX) {
+                        attentes++
+                        Log.i(TAG, "Quota atteint, attente de $secondes s")
+                        onAttente?.invoke(secondes)
+                        delay(secondes * 1000L)
+                        continue
+                    }
+                }
+
                 throw PanneCloud(
                     RequetesCloud.messageErreur(fournisseur, e.code, e.detail, modeleRetenu),
                     repliPossible = e.code == 429 || e.code in 500..599,
@@ -152,9 +173,10 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
         try {
             appel.execute().use { reponse ->
                 if (!reponse.isSuccessful) {
+                    val attente = attenteDemandee(reponse)
                     val detail = RequetesCloud.detailErreur(reponse.body?.string().orEmpty())
                     Log.w(TAG, "${fournisseur.hote} a repondu ${reponse.code}")
-                    throw ReponseInvalide(reponse.code, masquer(detail, cle))
+                    throw ReponseInvalide(reponse.code, masquer(detail, cle), attente)
                 }
 
                 val source = reponse.body?.source()
@@ -251,11 +273,44 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
     private fun masquer(texte: String, cle: String): String =
         if (cle.length < 8) texte else texte.replace(cle.trim(), "***")
 
-    private class ReponseInvalide(val code: Int, val detail: String) : Exception(detail)
+    private class ReponseInvalide(
+        val code: Int,
+        val detail: String,
+        /** Secondes d'attente demandees par l'en-tete Retry-After, si present. */
+        val attenteS: Int? = null,
+    ) : Exception(detail)
+
+    /**
+     * Lit l'attente demandee par le fournisseur.
+     *
+     * Groq la donne en secondes, parfois fractionnaires ("7.66"). C'est
+     * l'information la plus utile d'un 429 : elle dit exactement quand la
+     * fenetre se reouvre, au lieu de laisser deviner.
+     */
+    private fun attenteDemandee(reponse: okhttp3.Response): Int? {
+        val brut = reponse.header("retry-after")
+            ?: reponse.header("x-ratelimit-reset-tokens")
+            ?: reponse.header("x-ratelimit-reset-requests")
+            ?: return null
+        val nombre = brut.trim().removeSuffix("s").toDoubleOrNull() ?: return null
+        return kotlin.math.ceil(nombre).toInt().coerceAtLeast(1)
+    }
 
     companion object {
         private const val TAG = "ClientCloud"
         private const val MAX_TENTATIVES = 2
+
+        /**
+         * Le quota par minute se renouvelle en 60 secondes. Au-dela, ce n'est
+         * plus la fenetre glissante qui bloque mais le quota journalier :
+         * attendre ne servirait a rien.
+         */
+        private const val ATTENTE_MAX = 75
+        private const val ATTENTE_PAR_DEFAUT = 30
+
+        /** Quatre etapes dans le pipeline, donc au plus une attente par etape. */
+        private const val MAX_ATTENTES = 4
+
         private const val AGENT = "JobMaker/1.0 (Android)"
 
         fun clientParDefaut(): OkHttpClient = OkHttpClient.Builder()

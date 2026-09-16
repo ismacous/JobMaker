@@ -25,9 +25,19 @@ class MoteurCloud(
     private val modele: String,
     /** Fournie a l'appel, jamais conservee en clair sur le disque. */
     private val cle: String,
+    /** Remonte a l'ecran ce que l'utilisateur doit savoir pendant la generation. */
+    private val onInfo: ((String) -> Unit)? = null,
 ) : MoteurTexte {
 
     private val modeleRetenu = modele.ifBlank { fournisseur.modeleParDefaut }
+
+    /**
+     * L'attente du quota n'est signalee qu'une fois par generation. Elle se
+     * repete a chaque etape sur les offres gratuites les plus serrees, et
+     * quatre bandeaux identiques n'apprennent rien de plus que le premier.
+     */
+    @Volatile
+    private var attenteAnnoncee = false
 
     override val nomCourt: String = fournisseur.nom
 
@@ -67,10 +77,31 @@ class MoteurCloud(
             messages = messages,
             params = params.copy(maxTokens = budget(params.maxTokens)),
             onToken = onToken,
+            onAttente = { secondes -> annoncerAttente(secondes) },
         )
     }
 
     override suspend fun liberer() = Unit
+
+    /**
+     * Les quotas gratuits se comptent en tokens par minute, et une
+     * candidature complete en depense plusieurs milliers a chaque etape.
+     * Attendre le renouvellement de la fenetre vaut mieux que de rendre la main
+     * au modele du telephone : quelques dizaines de secondes contre plusieurs
+     * minutes, et une bien meilleure redaction.
+     */
+    private fun annoncerAttente(secondes: Int) {
+        if (attenteAnnoncee) return
+        attenteAnnoncee = true
+        onInfo?.invoke(
+            "Quota gratuit de ${fournisseur.nom} atteint : il se compte en tokens par " +
+                "minute, et votre annonce en consomme beaucoup. L'application attend " +
+                "le renouvellement (environ ${secondes} s) entre les etapes plutot que " +
+                "de basculer sur le modele du telephone. C'est normal, la generation " +
+                "suit son cours.\n\nPour aller plus vite : un modele plus petit " +
+                "(openai/gpt-oss-20b) a un quota par minute plus large."
+        )
+    }
 
     /**
      * Les budgets de tokens du pipeline ont ete tailles pour un modele local,

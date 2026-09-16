@@ -43,7 +43,9 @@ enum class FournisseurCloud(
         modeleParDefaut = "openai/gpt-oss-120b",
         urlCle = "https://console.groq.com/keys",
         prefixeCle = "gsk_",
-        quota = "environ 30 requetes par minute et 14 400 par jour",
+        quota = "14 400 requetes par jour, mais surtout 6 000 a 30 000 tokens par " +
+            "minute selon le modele -- c'est cette limite-la que l'on atteint, les " +
+            "gros modeles etant les plus serres",
         resume = "Le plus rapide : quelques secondes pour un CV complet. " +
             "Inscription par e-mail, sans carte bancaire.",
         politiqueDonnees = "Groq annonce ne pas entrainer ses modeles sur le contenu " +
@@ -56,7 +58,8 @@ enum class FournisseurCloud(
         modeleParDefaut = "gemini-flash-latest",
         urlCle = "https://aistudio.google.com/apikey",
         prefixeCle = "AIza",
-        quota = "environ 15 requetes par minute et 1 500 par jour",
+        quota = "environ 15 requetes par minute, 1 500 par jour et 1 million de " +
+            "tokens par minute -- la plus confortable des trois sur les gros textes",
         resume = "La meilleure qualite de redaction des trois, et le seul a " +
             "garantir un JSON conforme au schema demande.",
         politiqueDonnees = "Attention : sur l'offre GRATUITE, Google se reserve le droit " +
@@ -71,7 +74,8 @@ enum class FournisseurCloud(
         modeleParDefaut = "meta-llama/llama-3.3-70b-instruct:free",
         urlCle = "https://openrouter.ai/keys",
         prefixeCle = "sk-or-",
-        quota = "variable selon le modele, quelques dizaines de requetes par jour",
+        quota = "variable selon le modele, souvent quelques dizaines de requetes " +
+            "par jour",
         resume = "Un seul compte donne acces aux modeles gratuits de plusieurs " +
             "editeurs. Pratique en secours quand un quota est atteint ailleurs.",
         politiqueDonnees = "Depend du modele choisi. Les modeles marques \":free\" sont " +

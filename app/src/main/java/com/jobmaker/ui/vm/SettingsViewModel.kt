@@ -36,6 +36,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun setCouleur(v: String) = lance { container.settingsRepository.setCouleurAccent(v) }
     fun setPhoto(v: Boolean) = lance { container.settingsRepository.setPhotoSurCv(v) }
     fun setRelecture(v: Boolean) = lance { container.settingsRepository.setRelectureActive(v) }
+    fun setRelectureCloud(v: Boolean) =
+        lance { container.settingsRepository.setRelectureCloud(v) }
     fun setPasses(v: Int) = lance { container.settingsRepository.setPassesCorrection(v) }
     fun setLangue(v: LangueSortie) = lance { container.settingsRepository.setLangueSortie(v) }
     fun setUnePage(v: Boolean) = lance { container.settingsRepository.setCvUnePage(v) }

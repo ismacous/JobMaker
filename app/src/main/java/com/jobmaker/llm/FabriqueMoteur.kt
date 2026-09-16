@@ -45,6 +45,7 @@ class FabriqueMoteur(
             fournisseur = config.fournisseur,
             modele = config.modeleCloud,
             cle = cle,
+            onInfo = onAvertissement,
         )
 
         val repliDisponible = config.repliLocal && modelManager.installed.value.isNotEmpty()

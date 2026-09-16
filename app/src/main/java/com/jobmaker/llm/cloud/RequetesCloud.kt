@@ -311,9 +311,10 @@ object RequetesCloud {
         413 -> "L'offre collee est trop longue pour ce modele. Gardez l'essentiel " +
             "de l'annonce (missions, profil recherche, entreprise)."
 
-        429 -> "Quota gratuit atteint chez ${fournisseur.nom} (${fournisseur.quota}). " +
-            "Reessayez dans quelques minutes, changez de fournisseur, ou repassez " +
-            "sur le moteur de l'appareil."
+        429 -> "Quota gratuit de ${fournisseur.nom} epuise, et l'attente n'a pas suffi : " +
+            "c'est probablement la limite du jour. Trois sorties : un modele plus " +
+            "petit (son quota par minute est plus large), un autre fournisseur, ou " +
+            "le moteur de l'appareil. Detail du quota : ${fournisseur.quota}."
 
         in 500..599 -> "${fournisseur.nom} est momentanement indisponible (erreur $code). " +
             "Reessayez dans un instant."

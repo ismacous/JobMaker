@@ -80,12 +80,13 @@ class Orchestrator(
             }
 
             // La relecture critique et la correction sont les deux etapes les
-            // plus cheres du pipeline : en local elles doublent une generation
-            // de dix minutes, d'ou leur desactivation par defaut. Sur un moteur
-            // distant elles coutent quelques secondes -- et c'est exactement ce
-            // qui separe un CV correct d'un CV bon. On les active donc d'office
-            // des que le calcul ne se paie plus en minutes d'attente.
-            val relecture = settings.relectureActive || moteur.distant
+            // plus cheres du pipeline. En local elles doublent une generation
+            // de dix minutes, d'ou leur desactivation par defaut ; a distance
+            // elles ne coutent que quelques secondes de calcul, et c'est
+            // exactement ce qui separe un CV correct d'un CV bon. Chaque mode a
+            // donc son propre reglage, avec son propre defaut.
+            val relecture =
+                if (moteur.distant) settings.relectureCloud else settings.relectureActive
             val total = if (relecture) 4 else 2
 
             // ---------- 1. Analyse de l'offre et strategie ----------
