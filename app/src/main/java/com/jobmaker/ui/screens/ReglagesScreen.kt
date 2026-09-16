@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.jobmaker.data.prefs.LangueSortie
 import com.jobmaker.llm.AgentRole
+import com.jobmaker.llm.ModeMoteur
 import com.jobmaker.render.CvTemplates
 import com.jobmaker.ui.components.Bandeau
 import com.jobmaker.ui.components.SectionCarte
@@ -43,6 +44,7 @@ fun ReglagesScreen(
     vm: SettingsViewModel,
     onRetour: () -> Unit,
     onOuvrirModeles: () -> Unit,
+    onOuvrirMoteur: () -> Unit,
 ) {
     val reglages by vm.reglages.collectAsState()
     val installes by vm.installes.collectAsState()
@@ -65,11 +67,37 @@ fun ReglagesScreen(
                 .padding(horizontal = 12.dp),
         ) {
             // -----------------------------------------------------------------
+            // Moteur : le reglage qui decide de tout le reste
+            // -----------------------------------------------------------------
+            SectionCarte(
+                "Moteur d'IA",
+                sousTitre = "Ou tourne le calcul, et avec quel modele",
+            ) {
+                val cloud = reglages.modeMoteur == ModeMoteur.CLOUD
+                Text(
+                    if (cloud) {
+                        "API gratuite : ${reglages.fournisseurCloud.nom} " +
+                            "(${reglages.modeleCloudPour(reglages.fournisseurCloud)}). " +
+                            "Comptez quelques secondes par candidature."
+                    } else {
+                        "Sur l'appareil. Rien ne sort du telephone, comptez plusieurs " +
+                            "minutes par candidature."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedButton(
+                    onClick = onOuvrirMoteur,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Changer de moteur, de cle ou de modele") }
+            }
+
+            // -----------------------------------------------------------------
             // Affectation des modeles aux etapes
             // -----------------------------------------------------------------
             SectionCarte(
                 "Modeles par etape",
-                sousTitre = "Vous pouvez confier chaque etape a un modele different",
+                sousTitre = "S'applique au moteur embarque uniquement",
+                replierParDefaut = reglages.modeMoteur == ModeMoteur.CLOUD,
             ) {
                 if (installes.isEmpty()) {
                     Bandeau("Aucun modele installe.", TypeBandeau.ERREUR) {
@@ -131,11 +159,16 @@ fun ReglagesScreen(
                 LigneInterrupteur(
                     titre = "Relecture automatique",
                     detail = "Deux etapes supplementaires relisent le CV et la lettre, puis " +
-                        "les reecrivent. Elles doublent le temps de generation. Desactivees " +
-                        "par defaut : les controles automatiques (employeur, diplome ou " +
-                        "chiffre absent du profil) tournent de toute facon, et le bouton " +
-                        "\"Relire\" sur une candidature terminee fait la meme chose quand " +
-                        "vous le decidez.",
+                        "les reecrivent. Sur le moteur embarque elles doublent le temps de " +
+                        "generation, d'ou leur desactivation par defaut : les controles " +
+                        "automatiques (employeur, diplome ou chiffre absent du profil) " +
+                        "tournent de toute facon, et le bouton \"Relire\" sur une " +
+                        "candidature terminee fait la meme chose quand vous le decidez." +
+                        if (reglages.modeMoteur == ModeMoteur.CLOUD) {
+                            "\n\nEn mode API, elles ne coutent que quelques secondes : " +
+                                "elles sont donc appliquees a chaque generation, que cet " +
+                                "interrupteur soit actif ou non."
+                        } else "",
                     valeur = reglages.relectureActive,
                     onChange = vm::setRelecture,
                 )
@@ -318,14 +351,29 @@ fun ReglagesScreen(
 
             SectionCarte("Confidentialite", replierParDefaut = true) {
                 Text(
-                    "Votre profil, vos offres, vos CV et vos lettres ne quittent jamais ce " +
-                        "telephone. La seule connexion reseau de l'application est le " +
-                        "telechargement des modeles depuis HuggingFace, et elle n'envoie " +
-                        "alors aucune de vos donnees.\n\n" +
-                        "Pensez a exporter votre profil (onglet Profil, en bas) : " +
-                        "en cas de perte du telephone, c'est votre seule sauvegarde.",
+                    if (reglages.modeMoteur == ModeMoteur.CLOUD) {
+                        "Moteur actuel : ${reglages.fournisseurCloud.nom}. A chaque " +
+                            "generation, le texte de l'offre et le resume de votre profil " +
+                            "sont envoyes chez ce fournisseur. Vos coordonnees exactes, " +
+                            "votre photo, vos candidatures enregistrees et vos PDF ne " +
+                            "partent jamais : ils sont ajoutes au moment du rendu, sur " +
+                            "l'appareil.\n\n" +
+                            "Pour que plus rien ne sorte du telephone, basculez le moteur " +
+                            "sur \"Sur l'appareil\"."
+                    } else {
+                        "Votre profil, vos offres, vos CV et vos lettres ne quittent jamais " +
+                            "ce telephone. La seule connexion reseau de l'application est le " +
+                            "telechargement des modeles depuis HuggingFace, et elle n'envoie " +
+                            "alors aucune de vos donnees."
+                    } + "\n\n" +
+                        "Dans les deux cas : pensez a exporter votre profil (onglet Profil, " +
+                        "en bas). En cas de perte du telephone, c'est votre seule sauvegarde.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                OutlinedButton(
+                    onClick = onOuvrirMoteur,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Voir le detail de ce qui est envoye") }
             }
 
             Spacer(Modifier.height(30.dp))

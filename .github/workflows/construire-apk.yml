@@ -59,6 +59,12 @@ jobs:
             "ndk;27.2.12479018" \
             "cmake;3.22.1"
 
+      # Le depot est public : une cle d'API qui s'y glisse est publiee pour
+      # toujours. Cette verification passe avant la compilation pour que le
+      # probleme saute aux yeux au lieu d'etre noye dans les logs Gradle.
+      - name: Verifier qu'aucun secret n'est versionne
+        run: ./scripts/verifier-secrets.sh
+
       - name: Tests unitaires
         run: ./gradlew --no-daemon testDebugUnitTest
 

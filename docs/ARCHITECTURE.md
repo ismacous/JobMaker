@@ -17,13 +17,17 @@ Offre collée
 └─────────────────────────────────────────────────┘
     │                              │
     ▼                              ▼
-LlmRuntime ──► LlamaBridge     Candidature (Room)
-  (Kotlin)       (JNI)              │
-                   │                ▼
-                   ▼          HtmlRenderer ──► PdfExporter
-              llama.cpp          (gabarit)     (moteur d'impression Android)
-               (C++/NDK)
+MoteurTexte  (interface)       Candidature (Room)
+    │                               │
+    ├── MoteurLocal                 ▼
+    │     └─ LlmRuntime ──► LlamaBridge (JNI) ──► llama.cpp (C++/NDK)
+    │                          HtmlRenderer ──► PdfExporter
+    └── MoteurCloud               (gabarit)     (moteur d'impression Android)
+          └─ ClientCloud ──► API distante (Groq / Gemini / OpenRouter)
 ```
+
+L'orchestrateur ne connaît que `MoteurTexte`. `MoteurAvecRepli` enveloppe le
+moteur distant et bascule sur le local en cas de panne passagère.
 
 ## Organisation du code
 
@@ -35,12 +39,23 @@ app/src/main/
 ├── assets/
 │   └── models_catalog.json   catalogue des modèles téléchargeables
 └── java/com/jobmaker/
-    ├── llm/                  moteur d'inférence
+    ├── llm/                  moteurs de génération
+    │   ├── MoteurTexte.kt        l'interface que voit l'orchestrateur
+    │   ├── ConfigMoteur.kt       mode, fournisseur, modèle, repli
+    │   ├── FabriqueMoteur.kt     choisit le moteur selon les réglages
+    │   ├── MoteurAvecRepli.kt    distant, avec filet de sécurité local
     │   ├── LlamaBridge.kt        déclarations natives
     │   ├── LlmRuntime.kt         session unique, sérialisation des appels
     │   ├── ModelCatalog.kt       catalogue et rôles d'agents
     │   ├── ModelManager.kt       téléchargement, import, suppression
-    │   └── GenerationParams.kt   réglages d'échantillonnage
+    │   ├── GenerationParams.kt   réglages d'échantillonnage
+    │   ├── local/
+    │   │   └── MoteurLocal.kt    GGUF chargé dans le processus
+    │   └── cloud/
+    │       ├── FournisseurCloud.kt  les trois offres gratuites
+    │       ├── RequetesCloud.kt     corps, flux SSE, erreurs (pur, testable)
+    │       ├── ClientCloud.kt       appels OkHttp, reprises, redaction
+    │       └── MoteurCloud.kt       implémentation distante de MoteurTexte
     ├── agents/               la couche « intelligence »
     │   ├── Prompts.kt            toutes les consignes
     │   ├── Orchestrator.kt       enchaînement des étapes
@@ -52,7 +67,7 @@ app/src/main/
     │   ├── model/                Profile, Candidature, sorties d'agents
     │   ├── db/                   Room
     │   ├── repo/                 dépôts
-    │   └── prefs/                réglages (DataStore)
+    │   └── prefs/                réglages (DataStore) + CoffreCles (clés d'API)
     ├── render/
     │   ├── CvTemplates.kt        les quatre gabarits (CSS)
     │   ├── HtmlRenderer.kt       contenu → HTML A4
@@ -62,6 +77,48 @@ app/src/main/
 ```
 
 ## Décisions techniques
+
+### Un moteur de texte derrière une interface, pas un `if` dans l'orchestrateur
+
+Le pipeline a été écrit pour un modèle local et fonctionne aussi bien avec une
+API distante : mêmes prompts, mêmes vérifications, mêmes garde-fous contre
+l'invention. Il aurait été tentant de brancher l'API par un test au bon endroit
+dans `Orchestrator` ; le choix a été d'introduire `MoteurTexte` et de faire
+passer les deux implémentations par la même porte.
+
+Ce que cela achète :
+
+- La règle « l'IA n'a pas le droit d'inventer » ne dépend pas du moteur.
+  `FactCheck` et la recopie des formations depuis le profil s'appliquent aux
+  deux, sans duplication.
+- `MoteurAvecRepli` devient possible : un décorateur de 60 lignes qui bascule du
+  distant au local en cours de pipeline, sans que l'orchestrateur le sache.
+- Les tests portent sur la construction des requêtes et la lecture du flux
+  (`RequetesCloud`, fonctions pures), pas sur un assemblage difficile à isoler.
+
+### Ne jamais embarquer de clé, parce que le dépôt est public
+
+Le dépôt est public — c'est ce qui donne droit aux minutes de compilation
+gratuites de GitHub Actions. Une clé partagée, livrée avec l'APK, serait donc
+publiée deux fois : dans l'historique Git et dans l'APK décompilable.
+
+D'où l'architecture : chacun saisit sa clé, elle est chiffrée par le Keystore
+matériel, exclue des sauvegardes, jamais journalisée, et relue au coffre au
+début de chaque génération plutôt que conservée en mémoire. Un script vérifie à
+chaque compilation qu'aucune clé n'a été commitée. Détail dans
+[`SECURITE.md`](SECURITE.md).
+
+### JSON contraint par l'API quand elle sait le faire
+
+En local, le JSON produit par un modèle de 4 milliards de paramètres est
+souvent presque valide, d'où `JsonRepair` et la passe de réparation par le
+modèle lui-même. Les API savent contraindre la sortie (`response_format` chez
+les dialectes OpenAI, `responseMimeType` chez Google) : `GenerationParams`
+porte donc un indicateur `sortieJson` que seuls les moteurs distants honorent.
+La passe de réparation reste en place — elle ne se déclenche simplement plus.
+
+Un modèle distant qui refuserait ce mode (`400`) fait retenter l'appel sans la
+contrainte : mieux vaut un JSON à réparer qu'une génération perdue.
 
 ### llama.cpp plutôt que MLC-LLM
 

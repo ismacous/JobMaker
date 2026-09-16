@@ -64,6 +64,7 @@ fun GenererScreen(
     onOuvrirProfil: () -> Unit,
     onOuvrirModeles: () -> Unit,
     onOuvrirReglages: () -> Unit,
+    onOuvrirMoteur: () -> Unit,
 ) {
     val offre by vm.offre.collectAsState()
 
@@ -79,7 +80,7 @@ fun GenererScreen(
     }
     val etat by vm.etat.collectAsState()
     val profil by vm.profile.collectAsState()
-    val modeles by vm.modelesInstalles.collectAsState()
+    val moteur by vm.apercuMoteur.collectAsState()
     val presse = LocalClipboardManager.current
 
     Scaffold(
@@ -101,13 +102,15 @@ fun GenererScreen(
                 .padding(horizontal = 14.dp),
         ) {
             // --- prerequis ---
-            if (modeles.isEmpty()) {
+            moteur.alerte?.let { alerte ->
                 Bandeau(
-                    "Aucun modele d'IA n'est installe. Sans modele, l'application ne peut " +
-                        "rien generer. Le telechargement se fait une seule fois, en Wi-Fi.",
-                    TypeBandeau.ERREUR,
+                    alerte,
+                    if (moteur.pret) TypeBandeau.ALERTE else TypeBandeau.ERREUR,
                 ) {
-                    Button(onClick = onOuvrirModeles) { Text("Telecharger un modele") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onOuvrirMoteur) { Text("Moteur d'IA") }
+                        OutlinedButton(onClick = onOuvrirModeles) { Text("Modeles") }
+                    }
                 }
             }
 
@@ -189,15 +192,13 @@ fun GenererScreen(
                         vm.lancer()
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = offre.isNotBlank() && modeles.isNotEmpty(),
+                    enabled = offre.isNotBlank() && moteur.pret,
                 ) {
                     Icon(Icons.Default.AutoAwesome, null, Modifier.size(20.dp))
                     Text("  Generer mon CV et ma lettre")
                 }
                 Text(
-                    "Tout se passe sur le telephone : comptez 2 a 10 minutes selon le modele " +
-                        "choisi. Vous pouvez quitter l'application, la generation continue et " +
-                        "vous previent quand c'est pret.",
+                    moteur.resume,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),

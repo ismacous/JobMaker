@@ -18,6 +18,13 @@ data class GenerationParams(
     val seed: Int = -1,
     /** Sequences qui coupent la generation des qu'elles apparaissent. */
     val stopSequences: List<String> = emptyList(),
+    /**
+     * Demande au moteur de contraindre sa sortie a un objet JSON. Sans effet
+     * en local (llama.cpp ne contraint pas la grammaire ici), mais les API
+     * distantes savent le garantir : c'est ce qui supprime la passe de
+     * reparation de JSON dans le pipeline cloud.
+     */
+    val sortieJson: Boolean = false,
 ) {
     companion object {
         /** Extraction / structuration : on veut la meme sortie a chaque fois. */

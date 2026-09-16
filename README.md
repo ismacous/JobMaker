@@ -1,13 +1,19 @@
 # JobMaker
 
 Application Android personnelle qui rédige un CV et une lettre de motivation
-**adaptés à chaque offre d'emploi**, avec une IA qui tourne **entièrement sur le
-téléphone**.
+**adaptés à chaque offre d'emploi**.
 
-Aucun compte, aucun abonnement, aucun serveur. Votre profil, les offres que vous
-collez et les documents produits ne quittent jamais l'appareil. La seule
-connexion réseau de l'application est le téléchargement du modèle d'IA, une
-fois.
+Aucun compte JobMaker, aucun abonnement, aucun serveur : l'application choisit
+entre deux moteurs, et c'est vous qui décidez.
+
+| Moteur | Durée par candidature | Ce qui sort du téléphone |
+|--------|----------------------|--------------------------|
+| **API gratuite** (Groq, Google Gemini, OpenRouter) | quelques secondes | L'offre et le résumé de votre profil partent chez le fournisseur choisi. Clé gratuite, sans carte bancaire. |
+| **Sur l'appareil** (llama.cpp) | 2 à 10 minutes | Rien. Nécessite de télécharger un modèle de ~2,5 Go, une fois. |
+
+Le réglage est dans *Réglages → Moteur d'IA* et se change à tout moment. Aucune
+clé n'est embarquée dans l'application : voir
+[`docs/SECURITE.md`](docs/SECURITE.md).
 
 ---
 
@@ -17,8 +23,9 @@ fois.
    identité, expériences, formation, compétences, langues, certifications,
    projets, bénévolat, permis, contraintes de recherche.
 2. **Candidater** — vous collez une offre d'emploi (Indeed, France Travail,
-   LinkedIn, une annonce en vitrine…). Six agents IA s'enchaînent et produisent
-   un CV et une lettre taillés pour cette offre précise.
+   LinkedIn, une annonce en vitrine…). Le pipeline produit un CV et une lettre
+   taillés pour cette offre précise — en quelques secondes via une API
+   gratuite, en quelques minutes avec le modèle embarqué.
 3. **Documents** — aperçu fidèle au PDF final, retouche manuelle de chaque
    ligne, choix parmi quatre mises en page, export PDF, copie en texte brut
    pour les formulaires en ligne. Le bouton **PDF** ouvre l'impression
@@ -110,18 +117,41 @@ versionnée dans le dépôt.
 
 ### 3. Mettre l'IA dedans
 
-Tout se fait dans l'application, en Wi-Fi, sans ordinateur :
+Deux chemins. Le premier prend deux minutes, le second une demi-heure de
+téléchargement. Les deux se font depuis le téléphone, sans ordinateur.
 
-1. L'écran d'accueil propose le modèle recommandé (**Qwen3 4B Instruct Q4**,
-   environ 2,5 Go). Appuyer sur **Télécharger**.
+#### A. Brancher une API gratuite — recommandé
+
+1. *Réglages → Moteur d'IA* → **Fournisseur** → **Groq** (offre gratuite la plus
+   généreuse, et le seul des trois à annoncer qu'il n'entraîne pas ses modèles
+   sur ce que vous envoyez).
+2. **Obtenir une clé gratuite** ouvre `console.groq.com/keys` dans le
+   navigateur : compte par e-mail, sans carte bancaire. Copier la clé.
+3. La coller dans le champ **Coller la clé** → **Enregistrer**. Elle est
+   aussitôt chiffrée par le matériel du téléphone.
+4. **Tester la connexion** : un aller-retour réel qui vérifie clé, modèle et
+   réseau d'un coup.
+
+Si le fournisseur retire le modèle par défaut — cela arrive tous les quelques
+mois — *Changer de modèle* interroge l'API et affiche ceux réellement
+disponibles avec votre clé.
+
+#### B. Télécharger un modèle embarqué
+
+1. *Réglages → Moteur d'IA* → mode **Sur l'appareil**, puis **Gérer les
+   modèles**. Le modèle recommandé est **Qwen3 4B Instruct Q4**, environ 2,5 Go.
 2. **Gardez l'application ouverte** pendant le téléchargement. S'il
    s'interrompt (écran verrouillé longtemps, Wi-Fi coupé), il reprend là où il
    s'était arrêté au relancement — rien n'est perdu.
 3. Profitez de l'attente pour remplir l'onglet **Profil**. C'est l'étape la
    plus longue et de loin la plus rentable : tout le reste en dépend.
 
-Ensuite, plus besoin d'internet du tout : collez une offre dans **Candidater**
-et lancez.
+Ensuite, plus besoin d'internet du tout.
+
+> Les deux se combinent : avec une clé **et** un modèle installé, l'option
+> *Filet de sécurité* termine la candidature sur le téléphone si le réseau tombe
+> ou si le quota gratuit est épuisé en pleine génération, au lieu de tout
+> perdre.
 
 ### Si le téléchargement du modèle échoue (erreur 404)
 
@@ -189,11 +219,27 @@ voulez.**
 
 ## Confidentialité
 
-- Aucune donnée personnelle n'est envoyée nulle part. L'application ne contacte
-  que HuggingFace, uniquement pour télécharger les fichiers de modèle, et ne
-  transmet alors rien vous concernant.
+Cela dépend du moteur choisi, et l'application l'affiche à chaque écran
+concerné.
+
+**Mode « sur l'appareil »** — aucune donnée personnelle n'est envoyée nulle
+part. L'application ne contacte que HuggingFace, uniquement pour télécharger les
+fichiers de modèle, et ne transmet alors rien vous concernant.
+
+**Mode « API gratuite »** — chaque génération envoie au fournisseur choisi le
+texte de l'offre et le résumé de votre profil (expériences, formations,
+compétences, langues), votre nom compris. Ne sortent **jamais** : votre photo,
+vos coordonnées exactes — ajoutées au CV après coup, au moment du rendu — vos
+candidatures enregistrées et vos PDF. Rien n'est envoyé à qui que ce soit
+d'autre : pas de serveur JobMaker, pas de statistiques, pas de compte.
+
+Dans les deux cas :
+
 - Tout est stocké dans l'espace privé de l'application. Une désinstallation
   efface tout.
+- Votre clé d'API est chiffrée par le Keystore matériel du téléphone, exclue des
+  sauvegardes, et n'apparaît jamais dans les journaux. Détail complet et limites
+  assumées : [`docs/SECURITE.md`](docs/SECURITE.md).
 - **Exportez votre profil régulièrement** : *Profil → Sauvegarde du profil →
   Exporter*. C'est votre seule protection en cas de perte du téléphone.
 
@@ -201,7 +247,18 @@ voulez.**
 
 ## En cas de problème
 
-**« Aucun modèle installé »** → *Réglages → Modèles d'IA* → télécharger.
+**« Aucun modèle installé »** → *Réglages → Moteur d'IA* : soit enregistrer une
+clé d'API gratuite (deux minutes), soit *Modèles d'IA* → télécharger (2,5 Go).
+
+**« Clé refusée »** → la clé a été révoquée ou mal collée. *Réglages → Moteur
+d'IA* → **Supprimer la clé**, puis en créer une nouvelle chez le fournisseur.
+
+**« Le modèle n'existe plus »** → les fournisseurs retirent des modèles
+régulièrement. *Réglages → Moteur d'IA → Changer de modèle* interroge l'API et
+liste ceux disponibles aujourd'hui.
+
+**« Quota gratuit atteint »** → attendre quelques minutes, changer de
+fournisseur, ou repasser sur le moteur embarqué.
 
 **Le téléchargement du modèle échoue (erreur 404)** → voir *Installation → Si le
 téléchargement du modèle échoue* plus haut. Trois solutions, toutes faisables
@@ -238,6 +295,8 @@ téléphone au chargeur et laisser l'écran allumé évite le problème.
   natif, problèmes connus
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — organisation du code et
   décisions techniques
+- [`docs/SECURITE.md`](docs/SECURITE.md) — ce qui est fait de la clé d'API, ce
+  qui sort du téléphone, et ce que cette architecture ne protège pas
 
 ## Tests
 
@@ -245,6 +304,10 @@ Ils tournent automatiquement à chaque compilation GitHub, avant la production d
 l'APK : une régression empêche la publication d'une version cassée. Sur un
 ordinateur : `./gradlew testDebugUnitTest`.
 
-24 tests couvrent les parties où une régression serait la plus coûteuse : la
-récupération du JSON produit par le modèle, la détection des inventions, et le
-rendu des documents.
+44 tests couvrent les parties où une régression serait la plus coûteuse : la
+construction des requêtes vers les API distantes et la lecture de leur flux, la
+récupération du JSON produit par un modèle local, la détection des inventions,
+et le rendu des documents.
+
+La compilation vérifie aussi, avant toute autre chose, qu'aucune clé d'API n'a
+été commitée (`scripts/verifier-secrets.sh`).

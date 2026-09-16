@@ -35,15 +35,16 @@ import com.jobmaker.ui.vm.ModelsViewModel
 /**
  * Premier lancement.
  *
- * Trois choses a faire comprendre avant tout : rien ne sort du telephone, il
- * faut telecharger un modele une fois, et la qualite du resultat depend
- * directement du soin mis a remplir le profil.
+ * Trois choses a faire comprendre avant tout : il y a un choix a faire entre
+ * vitesse et confidentialite, ce choix se change a tout moment, et la qualite
+ * du resultat depend surtout du soin mis a remplir le profil.
  */
 @Composable
 fun BienvenueScreen(
     modelsVm: ModelsViewModel,
     onTermine: () -> Unit,
     onOuvrirModeles: () -> Unit,
+    onOuvrirMoteur: () -> Unit,
 ) {
     val installes by modelsVm.installes.collectAsState()
     val telechargements by modelsVm.telechargements.collectAsState()
@@ -61,7 +62,7 @@ fun BienvenueScreen(
         Spacer(Modifier.height(36.dp))
         Text("JobMaker", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Un CV et une lettre adaptes a chaque offre, generes sur votre telephone.",
+            "Un CV et une lettre adaptes a chaque offre, sans abonnement ni compte.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
@@ -71,21 +72,16 @@ fun BienvenueScreen(
 
         Etape(
             numero = "1",
-            titre = "Rien ne quitte votre telephone",
-            texte = "L'IA tourne en local. Votre profil, les offres que vous collez, vos CV " +
-                "et vos lettres restent sur l'appareil. Aucun compte, aucun abonnement, " +
-                "aucun envoi vers un serveur.",
+            titre = "Choisissez ou tourne l'IA",
+            texte = "Deux moteurs, le meme resultat, deux compromis. Une API gratuite " +
+                "(Groq, Google) rend un dossier complet en quelques secondes, mais " +
+                "l'offre et le resume de votre profil partent chez le fournisseur. " +
+                "Le modele embarque ne laisse rien sortir du telephone, mais demande " +
+                "une dizaine de minutes par candidature et 2,5 Go de telechargement. " +
+                "Ce choix se change a tout moment dans les reglages.",
         )
         Etape(
             numero = "2",
-            titre = "Un modele a telecharger, une seule fois",
-            texte = "C'est le cerveau de l'application : environ 2,5 Go a recuperer en Wi-Fi. " +
-                "Gardez l'application ouverte le temps du telechargement -- s'il " +
-                "s'interrompt, il reprendra ou il en etait. Ensuite, tout fonctionne hors " +
-                "ligne, y compris sans forfait.",
-        )
-        Etape(
-            numero = "3",
             titre = "Remplissez votre profil en detail",
             texte = "C'est la seule etape qui demande du temps, et celle qui decide de tout : " +
                 "l'IA n'a pas le droit d'inventer une experience. Elle ne peut mettre en " +
@@ -93,7 +89,7 @@ fun BienvenueScreen(
                 "des dizaines de candidatures.",
         )
         Etape(
-            numero = "4",
+            numero = "3",
             titre = "Puis une offre a la fois",
             texte = "Vous collez une annonce, l'application analyse ce qu'elle demande " +
                 "vraiment, choisit quoi mettre en avant dans votre parcours, redige, relit " +
@@ -102,7 +98,7 @@ fun BienvenueScreen(
 
         Spacer(Modifier.height(14.dp))
 
-        // --- telechargement du modele recommande ---
+        // --- option 1 : l'API gratuite ---
         Card(
             Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -111,9 +107,43 @@ fun BienvenueScreen(
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    "Modele recommande",
+                    "Le plus simple",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    "Brancher une API gratuite",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Une cle gratuite a creer chez Groq ou Google, collee une fois dans " +
+                        "l'application. Rien a telecharger, quelques secondes par " +
+                        "candidature. La cle reste chiffree sur ce telephone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = onOuvrirMoteur, modifier = Modifier.fillMaxWidth()) {
+                    Text("Configurer le moteur d'IA")
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // --- option 2 : le modele embarque ---
+        Card(
+            Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    "Hors ligne, rien ne sort du telephone",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     recommande.name,

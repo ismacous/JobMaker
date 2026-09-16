@@ -8,7 +8,10 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.jobmaker.llm.AgentRole
+import com.jobmaker.llm.ConfigMoteur
 import com.jobmaker.llm.LlmRuntime
+import com.jobmaker.llm.ModeMoteur
+import com.jobmaker.llm.cloud.FournisseurCloud
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -21,6 +24,18 @@ enum class LangueSortie(val label: String) {
 }
 
 data class Settings(
+    /**
+     * Ou tourne le calcul. Par defaut l'API gratuite : une candidature y prend
+     * quelques secondes contre une dizaine de minutes sur le telephone, pour un
+     * meilleur resultat. Sans cle enregistree, l'application retombe d'elle-meme
+     * sur le modele local en le disant.
+     */
+    val modeMoteur: ModeMoteur = ModeMoteur.CLOUD,
+    val fournisseurCloud: FournisseurCloud = FournisseurCloud.GROQ,
+    /** Modele choisi chez chaque fournisseur. Absent = modele par defaut. */
+    val modeleCloud: Map<FournisseurCloud, String> = emptyMap(),
+    /** Repli sur le modele du telephone si le distant flanche en cours de route. */
+    val repliLocal: Boolean = true,
     /** Modele affecte a chaque agent. Vide = premier modele installe. */
     val modeleParRole: Map<AgentRole, String> = emptyMap(),
     val tailleContexte: Int = 6144,
@@ -49,7 +64,23 @@ data class Settings(
     val onboardingFait: Boolean = false,
 ) {
     fun modelePour(role: AgentRole): String? = modeleParRole[role]?.takeIf { it.isNotBlank() }
+
+    fun modeleCloudPour(f: FournisseurCloud): String =
+        modeleCloud[f]?.takeIf { it.isNotBlank() } ?: f.modeleParDefaut
 }
+
+/** Projette les reglages sur ce dont la fabrique de moteurs a besoin. */
+fun Settings.configMoteur() = ConfigMoteur(
+    mode = modeMoteur,
+    fournisseur = fournisseurCloud,
+    modeleCloud = modeleCloudPour(fournisseurCloud),
+    repliLocal = repliLocal,
+    modeleParRole = modeleParRole,
+    tailleContexte = tailleContexte,
+    threads = threads,
+    couchesGpu = couchesGpu,
+    chargerEnMemoire = chargerEnMemoire,
+)
 
 class SettingsRepository(private val context: Context) {
 
@@ -59,7 +90,16 @@ class SettingsRepository(private val context: Context) {
         val roles = AgentRole.entries.mapNotNull { role ->
             this[roleKey(role)]?.takeIf { it.isNotBlank() }?.let { role to it }
         }.toMap()
+        val modelesCloud = FournisseurCloud.entries.mapNotNull { f ->
+            this[modeleCloudKey(f)]?.takeIf { it.isNotBlank() }?.let { f to it }
+        }.toMap()
         return Settings(
+            modeMoteur = runCatching {
+                ModeMoteur.valueOf(this[KEY_MODE_MOTEUR] ?: ModeMoteur.CLOUD.name)
+            }.getOrDefault(ModeMoteur.CLOUD),
+            fournisseurCloud = FournisseurCloud.parNom(this[KEY_FOURNISSEUR]),
+            modeleCloud = modelesCloud,
+            repliLocal = this[KEY_REPLI_LOCAL] ?: true,
             modeleParRole = roles,
             tailleContexte = this[KEY_CONTEXTE] ?: 6144,
             threads = this[KEY_THREADS] ?: LlmRuntime.defaultThreads(),
@@ -77,6 +117,18 @@ class SettingsRepository(private val context: Context) {
             onboardingFait = this[KEY_ONBOARDING] ?: false,
         )
     }
+
+    suspend fun setModeMoteur(value: ModeMoteur) =
+        context.dataStore.edit { it[KEY_MODE_MOTEUR] = value.name }
+
+    suspend fun setFournisseurCloud(value: FournisseurCloud) =
+        context.dataStore.edit { it[KEY_FOURNISSEUR] = value.name }
+
+    suspend fun setModeleCloud(fournisseur: FournisseurCloud, modele: String) =
+        context.dataStore.edit { it[modeleCloudKey(fournisseur)] = modele.trim() }
+
+    suspend fun setRepliLocal(value: Boolean) =
+        context.dataStore.edit { it[KEY_REPLI_LOCAL] = value }
 
     suspend fun setModelePourRole(role: AgentRole, modelId: String) =
         context.dataStore.edit { it[roleKey(role)] = modelId }
@@ -102,6 +154,9 @@ class SettingsRepository(private val context: Context) {
     suspend fun setOnboardingFait(value: Boolean) = context.dataStore.edit { it[KEY_ONBOARDING] = value }
 
     private companion object {
+        val KEY_MODE_MOTEUR = stringPreferencesKey("mode_moteur")
+        val KEY_FOURNISSEUR = stringPreferencesKey("fournisseur_cloud")
+        val KEY_REPLI_LOCAL = booleanPreferencesKey("repli_local")
         val KEY_CONTEXTE = intPreferencesKey("taille_contexte")
         val KEY_THREADS = intPreferencesKey("threads")
         val KEY_GPU = intPreferencesKey("couches_gpu")

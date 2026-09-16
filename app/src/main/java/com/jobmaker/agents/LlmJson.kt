@@ -4,7 +4,7 @@ import android.util.Log
 import com.jobmaker.llm.ChatMessage
 import com.jobmaker.llm.GenerationParams
 import com.jobmaker.llm.LlmException
-import com.jobmaker.llm.LlmRuntime
+import com.jobmaker.llm.MoteurTexte
 import kotlinx.serialization.KSerializer
 
 private const val TAG = "LlmJson"
@@ -24,7 +24,7 @@ private const val NO_THINK = "/no_think"
  * correction porte sur quelques dizaines de tokens au lieu de plusieurs
  * milliers.
  */
-suspend fun <T> LlmRuntime.generateJson(
+suspend fun <T> MoteurTexte.generateJson(
     serializer: KSerializer<T>,
     system: String,
     user: String,
@@ -36,7 +36,9 @@ suspend fun <T> LlmRuntime.generateJson(
     val userText = if (suppressReasoning) "$user\n\n$NO_THINK" else user
 
     val messages = listOf(ChatMessage.system(system), ChatMessage.user(userText))
-    val raw = complete(messages, params, onLecturePrompt, onToken)
+    // sortieJson n'a d'effet que sur les moteurs distants, qui savent contraindre
+    // la sortie : la passe de reparation ci-dessous ne s'y declenche plus.
+    val raw = completer(messages, params.copy(sortieJson = true), onLecturePrompt, onToken)
 
     parseOrNull(serializer, raw)?.let { return it }
 
@@ -52,12 +54,12 @@ suspend fun <T> LlmRuntime.generateJson(
         if (suppressReasoning) { appendLine(); append(NO_THINK) }
     }
 
-    val repaired = complete(
+    val repaired = completer(
         messages = listOf(
             ChatMessage.system("Tu es un correcteur de JSON. Tu ne reponds que par du JSON valide."),
             ChatMessage.user(repairPrompt),
         ),
-        params = GenerationParams.precise(maxTokens = params.maxTokens),
+        params = GenerationParams.precise(maxTokens = params.maxTokens).copy(sortieJson = true),
         onToken = onToken,
     )
 
@@ -76,7 +78,7 @@ private fun <T> parseOrNull(serializer: KSerializer<T>, raw: String): T? {
 }
 
 /** Variante texte libre, pour les sorties destinees a etre lues telles quelles. */
-suspend fun LlmRuntime.generateProse(
+suspend fun MoteurTexte.generateProse(
     system: String,
     user: String,
     params: GenerationParams,
@@ -85,7 +87,7 @@ suspend fun LlmRuntime.generateProse(
     onToken: ((String) -> Unit)? = null,
 ): String {
     val userText = if (suppressReasoning) "$user\n\n$NO_THINK" else user
-    val raw = complete(
+    val raw = completer(
         messages = listOf(ChatMessage.system(system), ChatMessage.user(userText)),
         params = params,
         onLecturePrompt = onLecturePrompt,

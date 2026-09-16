@@ -12,7 +12,12 @@ import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.min
 
-class LlmException(message: String) : Exception(message)
+/**
+ * Panne du moteur de texte, quel qu'il soit. Ouverte a la derivation : le
+ * moteur distant precise, dans [com.jobmaker.llm.cloud.PanneCloud], si la
+ * panne justifie de basculer sur le modele local.
+ */
+open class LlmException(message: String) : Exception(message)
 
 /** Ce que l'application sait d'un modele installe et pret a servir. */
 data class LoadedModelInfo(

@@ -4,6 +4,10 @@
          gigaoctets) sont exclus : ils se retelechargent. -->
     <include domain="database" path="." />
     <include domain="sharedpref" path="." />
+    <!-- Les cles d'API ne sont pas sauvegardees : chiffrees par une cle qui ne
+         quitte pas le materiel, elles seraient de toute facon illisibles
+         ailleurs, et une sauvegarde de secret est un secret de plus a perdre. -->
+    <exclude domain="file" path="datastore/jobmaker_secrets.preferences_pb" />
     <exclude domain="file" path="models/" />
     <exclude domain="file" path="exports/" />
 </full-backup-content>

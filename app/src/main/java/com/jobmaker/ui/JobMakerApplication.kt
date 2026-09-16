@@ -34,6 +34,7 @@ import com.jobmaker.ui.screens.EditeurCvScreen
 import com.jobmaker.ui.screens.EditeurLettreScreen
 import com.jobmaker.ui.screens.GenererScreen
 import com.jobmaker.ui.screens.ModelesScreen
+import com.jobmaker.ui.screens.MoteurIaScreen
 import com.jobmaker.ui.screens.ProfilScreen
 import com.jobmaker.ui.screens.ReglagesScreen
 import com.jobmaker.ui.theme.JobMakerTheme
@@ -41,6 +42,7 @@ import com.jobmaker.ui.vm.DocumentsViewModel
 import com.jobmaker.ui.vm.ExplainViewModel
 import com.jobmaker.ui.vm.GenerateViewModel
 import com.jobmaker.ui.vm.ModelsViewModel
+import com.jobmaker.ui.vm.MoteurIaViewModel
 import com.jobmaker.ui.vm.ProfileViewModel
 import com.jobmaker.ui.vm.SettingsViewModel
 import com.jobmaker.ui.vm.vmFactory
@@ -53,6 +55,7 @@ object Routes {
     const val COMPRENDRE = "comprendre"
     const val REGLAGES = "reglages"
     const val MODELES = "modeles"
+    const val MOTEUR_IA = "moteur-ia"
     const val CANDIDATURE = "candidature/{id}"
     const val EDITEUR_CV = "editeur-cv/{id}"
     const val EDITEUR_LETTRE = "editeur-lettre/{id}"
@@ -90,6 +93,7 @@ fun JobMakerApplication(
         val explainVm: ExplainViewModel = viewModel(factory = factory)
         val modelsVm: ModelsViewModel = viewModel(factory = factory)
         val settingsVm: SettingsViewModel = viewModel(factory = factory)
+        val moteurVm: MoteurIaViewModel = viewModel(factory = factory)
 
         val reglages by settingsVm.reglages.collectAsState()
 
@@ -148,6 +152,7 @@ fun JobMakerApplication(
                             }
                         },
                         onOuvrirModeles = { navController.navigate(Routes.MODELES) },
+                        onOuvrirMoteur = { navController.navigate(Routes.MOTEUR_IA) },
                     )
                 }
 
@@ -158,6 +163,7 @@ fun JobMakerApplication(
                         onOuvrirProfil = { navController.navigate(Routes.PROFIL) },
                         onOuvrirModeles = { navController.navigate(Routes.MODELES) },
                         onOuvrirReglages = { navController.navigate(Routes.REGLAGES) },
+                        onOuvrirMoteur = { navController.navigate(Routes.MOTEUR_IA) },
                     )
                 }
 
@@ -188,11 +194,20 @@ fun JobMakerApplication(
                         vm = settingsVm,
                         onRetour = { navController.popBackStack() },
                         onOuvrirModeles = { navController.navigate(Routes.MODELES) },
+                        onOuvrirMoteur = { navController.navigate(Routes.MOTEUR_IA) },
                     )
                 }
 
                 composable(Routes.MODELES) {
                     ModelesScreen(vm = modelsVm, onRetour = { navController.popBackStack() })
+                }
+
+                composable(Routes.MOTEUR_IA) {
+                    MoteurIaScreen(
+                        vm = moteurVm,
+                        onRetour = { navController.popBackStack() },
+                        onOuvrirModeles = { navController.navigate(Routes.MODELES) },
+                    )
                 }
 
                 composable(Routes.CANDIDATURE) { backStack ->

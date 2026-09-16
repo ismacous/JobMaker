@@ -17,3 +17,9 @@
 # OkHttp
 -dontwarn okhttp3.**
 -dontwarn okio.**
+
+# Les enums sont persistes par leur nom dans DataStore (mode du moteur,
+# fournisseur, langue de sortie, role d'agent). Si R8 renomme leurs constantes,
+# Enum.name() change et les reglages enregistres deviennent illisibles apres
+# une mise a jour. On garde donc les enums du projet intacts.
+-keepclassmembers enum com.jobmaker.** { *; }

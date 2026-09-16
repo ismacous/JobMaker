@@ -14,11 +14,12 @@ import com.jobmaker.data.model.Review
 import com.jobmaker.data.model.Strategy
 import com.jobmaker.data.prefs.LangueSortie
 import com.jobmaker.data.prefs.Settings
+import com.jobmaker.data.prefs.configMoteur
 import com.jobmaker.llm.AgentRole
+import com.jobmaker.llm.FabriqueMoteur
 import com.jobmaker.llm.GenerationParams
 import com.jobmaker.llm.LlmException
-import com.jobmaker.llm.LlmRuntime
-import com.jobmaker.llm.ModelManager
+import com.jobmaker.llm.MoteurTexte
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.serialization.encodeToString
@@ -40,16 +41,20 @@ sealed interface PipelineEvent {
 /**
  * Enchaine les agents pour produire une candidature complete.
  *
- * Le pipeline est sequentiel et non parallele, pour une raison materielle :
- * deux modeles quantifies charges simultanement sur un telephone font
- * depasser le budget memoire du processus. Chaque etape peut cependant
- * utiliser un modele different -- l'orchestrateur decharge et recharge entre
- * les etapes. Affecter le meme modele a tous les roles supprime ces
- * rechargements et reste le reglage le plus rapide.
+ * L'orchestrateur ne sait pas ou tourne le calcul : il demande un
+ * [MoteurTexte] a la fabrique au debut de chaque pipeline, et ce moteur est
+ * soit un GGUF charge sur le telephone, soit une API distante. Tout le reste
+ * -- prompts, verification des faits, completion depuis le profil -- est
+ * identique dans les deux cas, ce qui est exactement le but : la qualite du
+ * resultat ne doit pas dependre de l'endroit ou le texte a ete produit.
+ *
+ * Le pipeline reste sequentiel. En local, c'est une contrainte materielle :
+ * deux modeles quantifies charges simultanement font depasser le budget memoire
+ * du processus. En distant, c'est une contrainte de quota : les offres
+ * gratuites comptent les requetes par minute.
  */
 class Orchestrator(
-    private val runtime: LlmRuntime,
-    private val modelManager: ModelManager,
+    private val fabrique: FabriqueMoteur,
 ) {
 
     private val prettyJson = Json { prettyPrint = true; encodeDefaults = true }
@@ -64,28 +69,38 @@ class Orchestrator(
         settings: Settings,
         candidatureExistante: Candidature? = null,
     ): Flow<PipelineEvent> = channelFlow {
-        val relecture = settings.relectureActive
-        val total = if (relecture) 4 else 2
-
         try {
             require(offre.isNotBlank()) { "Collez d'abord le texte de l'offre." }
             require(profile.identite.nomComplet.isNotBlank()) {
                 "Renseignez au moins votre nom dans l'onglet Profil."
             }
 
+            val moteur = fabrique.creer(settings.configMoteur()) {
+                trySend(PipelineEvent.Avertissement(it))
+            }
+
+            // La relecture critique et la correction sont les deux etapes les
+            // plus cheres du pipeline : en local elles doublent une generation
+            // de dix minutes, d'ou leur desactivation par defaut. Sur un moteur
+            // distant elles coutent quelques secondes -- et c'est exactement ce
+            // qui separe un CV correct d'un CV bon. On les active donc d'office
+            // des que le calcul ne se paie plus en minutes d'attente.
+            val relecture = settings.relectureActive || moteur.distant
+            val total = if (relecture) 4 else 2
+
             // ---------- 1. Analyse de l'offre et strategie ----------
             send(PipelineEvent.Etape(1, total, "Analyse et strategie",
                 "Lecture de l'annonce et choix de l'angle de candidature"))
-            val (prepModel, prepNoThink) = charger(AgentRole.ANALYSIS, settings)
-            send(PipelineEvent.Modele(prepModel))
+            val prep = moteur.preparer(AgentRole.ANALYSIS)
+            send(PipelineEvent.Modele(prep.nomModele))
 
-            val digest = digestAdapte(profile, settings)
-            val dossier = runtime.generateJson(
+            val digest = digestAdapte(moteur, profile, prep.tailleContexte)
+            val dossier = moteur.generateJson(
                 serializer = DossierPreparation.serializer(),
                 system = Prompts.preparationSystem,
                 user = Prompts.preparationUser(offre, digest.texte),
                 params = GenerationParams.precise(maxTokens = 1800),
-                suppressReasoning = prepNoThink,
+                suppressReasoning = prep.brideRaisonnement,
                 onLecturePrompt = { lus, t, ms -> trySend(PipelineEvent.Lecture(lus, t, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
             )
@@ -103,10 +118,10 @@ class Orchestrator(
             // ---------- 2. Redaction du CV et de la lettre ----------
             send(PipelineEvent.Etape(2, total, "Redaction",
                 "Ecriture du CV et de la lettre de motivation"))
-            val (redactionModel, redactionNoThink) = charger(AgentRole.WRITING, settings)
-            send(PipelineEvent.Modele(redactionModel))
+            val redaction = moteur.preparer(AgentRole.WRITING)
+            send(PipelineEvent.Modele(redaction.nomModele))
 
-            val rediges = runtime.generateJson(
+            val rediges = moteur.generateJson(
                 serializer = DocumentsRediges.serializer(),
                 system = Prompts.redactionSystem,
                 user = Prompts.redactionUser(
@@ -115,7 +130,7 @@ class Orchestrator(
                     profile.recherche.disponibilite, settings.cvUnePage,
                 ),
                 params = GenerationParams.writing(maxTokens = 3200),
-                suppressReasoning = redactionNoThink,
+                suppressReasoning = redaction.brideRaisonnement,
                 onLecturePrompt = { lus, t, ms -> trySend(PipelineEvent.Lecture(lus, t, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
             )
@@ -127,7 +142,7 @@ class Orchestrator(
 
             if (relecture) {
                 val etapes = relireEtCorriger(
-                    profile, settings, analyse, strategie, digest, langue, cv, lettre,
+                    moteur, profile, settings, analyse, strategie, digest, langue, cv, lettre,
                     premiereEtape = 3, total = total,
                 ) { trySend(it) }
                 cv = etapes.cv
@@ -187,10 +202,14 @@ class Orchestrator(
         settings: Settings,
     ): Flow<PipelineEvent> = channelFlow {
         try {
-            val digest = digestAdapte(profile, settings)
+            val moteur = fabrique.creer(settings.configMoteur()) {
+                trySend(PipelineEvent.Avertissement(it))
+            }
+            val contexte = moteur.preparer(AgentRole.REVIEW).tailleContexte
+            val digest = digestAdapte(moteur, profile, contexte)
             val langue = candidature.cv.langue.ifBlank { "fr" }
             val resultat = relireEtCorriger(
-                profile, settings, candidature.analyse, candidature.strategie, digest,
+                moteur, profile, settings, candidature.analyse, candidature.strategie, digest,
                 langue, candidature.cv, candidature.lettre,
                 premiereEtape = 1, total = 2,
             ) { trySend(it) }
@@ -213,6 +232,7 @@ class Orchestrator(
     }
 
     private suspend fun relireEtCorriger(
+        moteur: MoteurTexte,
         profile: Profile,
         settings: Settings,
         analyse: JobAnalysis,
@@ -230,17 +250,17 @@ class Orchestrator(
 
         emettre(PipelineEvent.Etape(premiereEtape, total, "Relecture critique",
             "Recherche d'inventions, d'oublis et de maladresses"))
-        val (relectureModel, relectureNoThink) = charger(AgentRole.REVIEW, settings)
-        emettre(PipelineEvent.Modele(relectureModel))
+        val relecture = moteur.preparer(AgentRole.REVIEW)
+        emettre(PipelineEvent.Modele(relecture.nomModele))
 
-        val revueIa = runtime.generateJson(
+        val revueIa = moteur.generateJson(
             serializer = Review.serializer(),
             system = Prompts.relecteurSystem,
             user = Prompts.relecteurUser(
                 analyse, digest.texte, cv.texteIntegral(), lettre.texteIntegral(),
             ),
             params = GenerationParams.precise(maxTokens = 1400),
-            suppressReasoning = relectureNoThink,
+            suppressReasoning = relecture.brideRaisonnement,
             onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
             onToken = { emettre(PipelineEvent.Jeton(it)) },
         )
@@ -268,12 +288,12 @@ class Orchestrator(
         if (besoinCorrection && settings.passesCorrection > 0) {
             emettre(PipelineEvent.Etape(premiereEtape + 1, total, "Correction",
                 "Application des corrections de la relecture"))
-            val (correctionModel, correctionNoThink) = charger(AgentRole.WRITING, settings)
-            emettre(PipelineEvent.Modele(correctionModel))
+            val correction = moteur.preparer(AgentRole.WRITING)
+            emettre(PipelineEvent.Modele(correction.nomModele))
 
             repeat(min(settings.passesCorrection, 2)) { passe ->
                 val cvCorrige = runCatching {
-                    runtime.generateJson(
+                    moteur.generateJson(
                         serializer = CvContent.serializer(),
                         system = Prompts.redacteurCvSystem,
                         user = Prompts.correctionCvUser(
@@ -281,7 +301,7 @@ class Orchestrator(
                             prettyJson.encodeToString(cv), revue, langue,
                         ),
                         params = GenerationParams.writing(maxTokens = 2200),
-                        suppressReasoning = correctionNoThink,
+                        suppressReasoning = correction.brideRaisonnement,
                         onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
                         onToken = { emettre(PipelineEvent.Jeton(it)) },
                     )
@@ -292,7 +312,7 @@ class Orchestrator(
                     revue.faitsInventes.isNotEmpty()
                 ) {
                     val lettreCorrigee = runCatching {
-                        runtime.generateJson(
+                        moteur.generateJson(
                             serializer = LetterContent.serializer(),
                             system = Prompts.redacteurLettreSystem,
                             user = Prompts.correctionLettreUser(
@@ -300,7 +320,7 @@ class Orchestrator(
                                 prettyJson.encodeToString(lettre), revue, langue,
                             ),
                             params = GenerationParams.writing(maxTokens = 1600),
-                            suppressReasoning = correctionNoThink,
+                            suppressReasoning = correction.brideRaisonnement,
                             onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
                             onToken = { emettre(PipelineEvent.Jeton(it)) },
                         )
@@ -334,18 +354,21 @@ class Orchestrator(
 
             send(PipelineEvent.Etape(1, 1, "Analyse du metier",
                 "Explication du poste, du quotidien et de l'adequation avec votre profil"))
-            val (model, noThink) = charger(AgentRole.EXPLAIN, settings)
-            send(PipelineEvent.Modele(model))
+            val moteur = fabrique.creer(settings.configMoteur()) {
+                trySend(PipelineEvent.Avertissement(it))
+            }
+            val pret = moteur.preparer(AgentRole.EXPLAIN)
+            send(PipelineEvent.Modele(pret.nomModele))
 
             val digest = if (profile.identite.nomComplet.isBlank()) ProfileDigest("", emptyMap())
-            else digestAdapte(profile, settings)
+            else digestAdapte(moteur, profile, pret.tailleContexte)
 
-            val explication = runtime.generateJson(
+            val explication = moteur.generateJson(
                 serializer = JobExplanation.serializer(),
                 system = Prompts.explicateurSystem,
                 user = Prompts.explicateurUser(offre, digest.texte),
                 params = GenerationParams.explaining(maxTokens = 2400),
-                suppressReasoning = noThink,
+                suppressReasoning = pret.brideRaisonnement,
                 onLecturePrompt = { lus, total, ms -> trySend(PipelineEvent.Lecture(lus, total, ms)) },
                 onToken = { trySend(PipelineEvent.Jeton(it)) },
             )
@@ -359,45 +382,19 @@ class Orchestrator(
     // Outils internes
     // -----------------------------------------------------------------------
 
-    /** Charge le modele affecte a [role]. Retourne son nom et s'il faut brider son raisonnement. */
-    private suspend fun charger(role: AgentRole, settings: Settings): Pair<String, Boolean> {
-        val installes = modelManager.installed.value
-        if (installes.isEmpty()) {
-            throw LlmException(
-                "Aucun modele installe. Ouvrez Reglages > Modeles d'IA et telechargez " +
-                    "au moins un modele (Wi-Fi conseille)."
-            )
-        }
-        val demande = settings.modelePour(role)
-        val choisi = installes.firstOrNull { it.id == demande } ?: installes.first()
-        val entree = modelManager.catalog.byId(choisi.id)
-
-        val contexte = min(
-            settings.tailleContexte,
-            entree?.contextMax ?: settings.tailleContexte,
-        ).coerceAtLeast(2048)
-
-        runtime.ensureLoaded(
-            modelId = choisi.id,
-            filePath = choisi.file.absolutePath,
-            contextSize = contexte,
-            threads = settings.threads,
-            gpuLayers = settings.couchesGpu,
-            chargerEnMemoire = settings.chargerEnMemoire,
-        )
-        return choisi.displayName to (entree?.emitsReasoning ?: false)
-    }
-
     /**
      * Choisit entre profil detaille et profil resume selon la place disponible
-     * dans la fenetre de contexte du modele charge.
+     * dans la fenetre de contexte du moteur prepare.
      */
-    private suspend fun digestAdapte(profile: Profile, settings: Settings): ProfileDigest {
+    private suspend fun digestAdapte(
+        moteur: MoteurTexte,
+        profile: Profile,
+        tailleContexte: Int,
+    ): ProfileDigest {
         val complet = ProfileSerializer.digest(profile)
-        val contexte = runtime.currentModel?.contextSize ?: settings.tailleContexte
         // On reserve la moitie du contexte au prompt systeme, a l'offre et a la sortie.
-        val budget = contexte / 2
-        val tokens = runtime.tokenCount(complet.texte)
+        val budget = tailleContexte / 2
+        val tokens = moteur.tokenCount(complet.texte)
         return if (tokens <= budget) complet else ProfileSerializer.digestCourt(profile)
     }
 

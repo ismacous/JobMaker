@@ -12,5 +12,6 @@ fun vmFactory(container: AppContainer): ViewModelProvider.Factory = viewModelFac
     initializer { DocumentsViewModel(container) }
     initializer { ExplainViewModel(container) }
     initializer { ModelsViewModel(container) }
+    initializer { MoteurIaViewModel(container) }
     initializer { SettingsViewModel(container) }
 }
