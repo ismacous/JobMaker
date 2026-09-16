@@ -171,5 +171,10 @@ class SettingsRepository(private val context: Context) {
         val KEY_ONBOARDING = booleanPreferencesKey("onboarding_fait")
 
         fun roleKey(role: AgentRole) = stringPreferencesKey("modele_${role.name}")
+
+        /** Une cle par fournisseur : changer de fournisseur ne perd pas le
+         *  modele choisi chez le precedent. */
+        fun modeleCloudKey(f: FournisseurCloud) =
+            stringPreferencesKey("modele_cloud_${f.name}")
     }
 }
