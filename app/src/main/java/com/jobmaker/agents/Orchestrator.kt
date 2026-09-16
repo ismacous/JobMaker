@@ -11,6 +11,7 @@ import com.jobmaker.data.model.LetterContent
 import com.jobmaker.data.model.Probleme
 import com.jobmaker.data.model.Profile
 import com.jobmaker.data.model.Review
+import com.jobmaker.data.model.Revision
 import com.jobmaker.data.model.Strategy
 import com.jobmaker.data.prefs.LangueSortie
 import com.jobmaker.data.prefs.Settings
@@ -87,7 +88,7 @@ class Orchestrator(
             // donc son propre reglage, avec son propre defaut.
             val relecture =
                 if (moteur.distant) settings.relectureCloud else settings.relectureActive
-            val total = if (relecture) 4 else 2
+            val total = if (relecture) 3 else 2
 
             // ---------- 1. Analyse de l'offre et strategie ----------
             send(PipelineEvent.Etape(1, total, "Analyse et strategie",
@@ -143,7 +144,7 @@ class Orchestrator(
 
             if (relecture) {
                 val etapes = relireEtCorriger(
-                    moteur, profile, settings, analyse, strategie, digest, langue, cv, lettre,
+                    moteur, profile, analyse, langue, cv, lettre,
                     premiereEtape = 3, total = total,
                 ) { trySend(it) }
                 cv = etapes.cv
@@ -206,13 +207,11 @@ class Orchestrator(
             val moteur = fabrique.creer(settings.configMoteur()) {
                 trySend(PipelineEvent.Avertissement(it))
             }
-            val contexte = moteur.preparer(AgentRole.REVIEW).tailleContexte
-            val digest = digestAdapte(moteur, profile, contexte)
             val langue = candidature.cv.langue.ifBlank { "fr" }
             val resultat = relireEtCorriger(
-                moteur, profile, settings, candidature.analyse, candidature.strategie, digest,
-                langue, candidature.cv, candidature.lettre,
-                premiereEtape = 1, total = 2,
+                moteur, profile, candidature.analyse, langue,
+                candidature.cv, candidature.lettre,
+                premiereEtape = 1, total = 1,
             ) { trySend(it) }
             resultat.avertissement?.let { send(PipelineEvent.Avertissement(it)) }
 
@@ -235,10 +234,7 @@ class Orchestrator(
     private suspend fun relireEtCorriger(
         moteur: MoteurTexte,
         profile: Profile,
-        settings: Settings,
         analyse: JobAnalysis,
-        strategie: Strategy,
-        digest: ProfileDigest,
         langue: String,
         cvInitial: CvContent,
         lettreInitiale: LetterContent,
@@ -249,27 +245,56 @@ class Orchestrator(
         var cv = cvInitial
         var lettre = lettreInitiale
 
-        emettre(PipelineEvent.Etape(premiereEtape, total, "Relecture critique",
-            "Recherche d'inventions, d'oublis et de maladresses"))
+        emettre(PipelineEvent.Etape(premiereEtape, total, "Relecture et correction",
+            "Recherche d'inventions, d'oublis et de maladresses, puis reecriture"))
         val relecture = moteur.preparer(AgentRole.REVIEW)
         emettre(PipelineEvent.Modele(relecture.nomModele))
 
-        val revueIa = moteur.generateJson(
-            serializer = Review.serializer(),
-            system = Prompts.relecteurSystem,
-            user = Prompts.relecteurUser(
-                analyse, digest.texte, cv.texteIntegral(), lettre.texteIntegral(),
-            ),
-            params = GenerationParams.precise(maxTokens = 1400),
-            suppressReasoning = relecture.brideRaisonnement,
-            onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
-            onToken = { emettre(PipelineEvent.Jeton(it)) },
-        )
+        // Une seule requete pour relire ET corriger.
+        //
+        // C'etaient trois appels : relire, reecrire le CV, reecrire la lettre.
+        // Chacun renvoyait l'annonce, le profil et les documents -- le profil
+        // seul pese deux mille cinq cents tokens, et repartait a chaque fois.
+        // Sur un modele local cela ne coutait que du temps ; sur un quota
+        // gratuit compte en tokens par minute, cela brulait la moitie du
+        // budget d'une candidature pour rien.
+        //
+        // Le profil part ici dans sa version courte : le modele n'en a besoin
+        // que pour reperer les inventions, et FactCheck fait de toute facon ce
+        // travail mecaniquement, sans jamais rater un employeur ou un diplome.
+        val profilCourt = ProfileSerializer.digestCourt(profile).texte
+        val revision = runCatching {
+            moteur.generateJson(
+                serializer = Revision.serializer(),
+                system = Prompts.revisionSystem,
+                user = Prompts.revisionUser(
+                    analyse, profilCourt,
+                    prettyJson.encodeToString(cv), prettyJson.encodeToString(lettre), langue,
+                ),
+                params = GenerationParams.writing(maxTokens = 3400),
+                suppressReasoning = relecture.brideRaisonnement,
+                onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
+                onToken = { emettre(PipelineEvent.Jeton(it)) },
+            )
+        }.getOrNull()
+
+        // Une revision illisible ne doit rien casser : on garde les documents
+        // deja rediges, et les controles mecaniques tournent quand meme.
+        if (revision != null) {
+            if (revision.cv.experiences.isNotEmpty() || revision.cv.titre.isNotBlank()) {
+                cv = completerDepuisProfil(revision.cv, profile, langue)
+            }
+            if (revision.lettre.paragraphes.isNotEmpty() || revision.lettre.objet.isNotBlank()) {
+                lettre = completerLettre(revision.lettre, profile, analyse, langue)
+            }
+        } else {
+            Log.w(TAG, "Revision illisible : les documents rediges sont conserves")
+        }
 
         // Les controles mecaniques passent apres l'IA et la completent : ils ne
         // ratent jamais un employeur, un diplome ou un chiffre inconnu.
         val rapport = FactCheck.verifier(profile, analyse, cv, lettre)
-        var revue = fusionner(revueIa, rapport)
+        val revue = fusionner(revision?.revue ?: Review(), rapport)
 
         val avertissement = if (rapport.aDesAlertes) {
             "Verification automatique : " + listOfNotNull(
@@ -279,64 +304,8 @@ class Orchestrator(
                     ?.let { "diplomes absents du profil (${it.joinToString(", ")})" },
                 rapport.chiffresSuspects.takeIf { it.isNotEmpty() }
                     ?.let { "chiffres non presents dans le profil (${it.joinToString(", ")})" },
-            ).joinToString(" ; ") + ". Ils vont etre retires."
+            ).joinToString(" ; ") + ". Verifiez-les avant d'envoyer."
         } else null
-
-        val besoinCorrection = revue.faitsInventes.isNotEmpty() ||
-            revue.problemes.any { it.gravite.lowercase() in setOf("bloquant", "important") } ||
-            revue.scoreGlobal < 85
-
-        if (besoinCorrection && settings.passesCorrection > 0) {
-            emettre(PipelineEvent.Etape(premiereEtape + 1, total, "Correction",
-                "Application des corrections de la relecture"))
-            val correction = moteur.preparer(AgentRole.WRITING)
-            emettre(PipelineEvent.Modele(correction.nomModele))
-
-            repeat(min(settings.passesCorrection, 2)) { passe ->
-                val cvCorrige = runCatching {
-                    moteur.generateJson(
-                        serializer = CvContent.serializer(),
-                        system = Prompts.redacteurCvSystem,
-                        user = Prompts.correctionCvUser(
-                            analyse, strategie, digest.texte,
-                            prettyJson.encodeToString(cv), revue, langue,
-                        ),
-                        params = GenerationParams.writing(maxTokens = 2200),
-                        suppressReasoning = correction.brideRaisonnement,
-                        onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
-                        onToken = { emettre(PipelineEvent.Jeton(it)) },
-                    )
-                }.getOrNull()
-                if (cvCorrige != null) cv = completerDepuisProfil(cvCorrige, profile, langue)
-
-                if (revue.problemes.any { it.zone.contains("lettre", true) } ||
-                    revue.faitsInventes.isNotEmpty()
-                ) {
-                    val lettreCorrigee = runCatching {
-                        moteur.generateJson(
-                            serializer = LetterContent.serializer(),
-                            system = Prompts.redacteurLettreSystem,
-                            user = Prompts.correctionLettreUser(
-                                analyse, digest.texte,
-                                prettyJson.encodeToString(lettre), revue, langue,
-                            ),
-                            params = GenerationParams.writing(maxTokens = 1600),
-                            suppressReasoning = correction.brideRaisonnement,
-                            onLecturePrompt = { lus, t, ms -> emettre(PipelineEvent.Lecture(lus, t, ms)) },
-                            onToken = { emettre(PipelineEvent.Jeton(it)) },
-                        )
-                    }.getOrNull()
-                    if (lettreCorrigee != null) {
-                        lettre = completerLettre(lettreCorrigee, profile, analyse, langue)
-                    }
-                }
-
-                val rapport2 = FactCheck.verifier(profile, analyse, cv, lettre)
-                revue = fusionner(revue.copy(faitsInventes = emptyList()), rapport2)
-                if (!rapport2.aDesAlertes) return@repeat
-                Log.i(TAG, "Passe de correction ${passe + 1} : alertes restantes")
-            }
-        }
 
         return Corrigee(cv, lettre, revue, avertissement)
     }

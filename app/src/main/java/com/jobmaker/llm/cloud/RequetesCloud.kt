@@ -40,7 +40,7 @@ object RequetesCloud {
      * benefice du raisonnement sur une offre mal redigee sans y engloutir le
      * budget -- et accelere la generation au passage.
      */
-    private fun raisonne(modele: String): Boolean =
+    fun raisonne(modele: String): Boolean =
         modele.contains("gpt-oss", ignoreCase = true)
 
     /**

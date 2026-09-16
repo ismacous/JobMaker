@@ -168,6 +168,25 @@ data class DocumentsRediges(
     val lettre: LetterContent = LetterContent(),
 )
 
+/**
+ * Relecture et correction en une seule reponse.
+ *
+ * Les deux etaient deux appels separes : le premier relisait tout pour produire
+ * un diagnostic, le second recevait a nouveau tout -- annonce, profil, CV,
+ * lettre -- pour appliquer ce diagnostic. Sur un modele local, ou les tokens ne
+ * coutent que du temps, c'etait sans consequence. Sur une API dont le quota
+ * gratuit se compte en tokens par minute, cela renvoyait le profil du candidat
+ * deux fois de plus pour rien.
+ *
+ * Le modele diagnostique et corrige donc dans la meme reponse.
+ */
+@Serializable
+data class Revision(
+    val revue: Review = Review(),
+    val cv: CvContent = CvContent(),
+    val lettre: LetterContent = LetterContent(),
+)
+
 @Serializable
 data class Review(
     val scoreGlobal: Int = 0,

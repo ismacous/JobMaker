@@ -7,13 +7,11 @@ Offre collée
     │
     ▼
 ┌─────────────────────────────────────────────────┐
-│ Orchestrator                                    │
-│   1. Analyste  → JobAnalysis                    │
-│   2. Stratège  → Strategy                       │
-│   3. Rédacteur CV     → CvContent               │
-│   4. Rédacteur lettre → LetterContent           │
-│   5. Relecteur → Review    (+ FactCheck, sans IA)│
-│   6. Correcteur → CvContent / LetterContent      │
+│ Orchestrator — 3 appels, pas 6                  │
+│   1. Préparation → JobAnalysis + Strategy       │
+│   2. Rédaction   → CvContent + LetterContent    │
+│   3. Révision    → Review + les deux, corrigés  │
+│                    (+ FactCheck, sans IA)       │
 └─────────────────────────────────────────────────┘
     │                              │
     ▼                              ▼
@@ -107,6 +105,26 @@ matériel, exclue des sauvegardes, jamais journalisée, et relue au coffre au
 début de chaque génération plutôt que conservée en mémoire. Un script vérifie à
 chaque compilation qu'aucune clé n'a été commitée. Détail dans
 [`SECURITE.md`](SECURITE.md).
+
+### Un appel coûte le profil entier, donc on en fait le moins possible
+
+Chaque appel renvoie l'annonce **et le profil du candidat**, qui pèse à lui seul
+~2 500 tokens. Sur un modèle local, un appel de plus ne coûte que du temps. Sur
+une offre gratuite dont le quota se compte en **tokens par minute**, il coûte une
+part du budget de la journée.
+
+Le pipeline est donc passé de six appels à trois, en fusionnant ce qui relisait
+deux fois les mêmes données :
+
+- analyse et stratégie étaient deux agents lisant chacun l'annonce et le profil ;
+- relecture et correction étaient trois appels — diagnostiquer, réécrire le CV,
+  réécrire la lettre — chacun renvoyant tout. Le modèle diagnostique et corrige
+  maintenant dans la même réponse, et reçoit le profil en version courte : il ne
+  lui sert qu'à repérer les inventions, ce que `FactCheck` vérifie de toute façon
+  mécaniquement et sans jamais rien rater.
+
+Mesuré sur une annonce de 3 600 caractères : **~30 000 tokens par candidature
+avant, ~19 000 après.**
 
 ### JSON contraint par l'API quand elle sait le faire
 

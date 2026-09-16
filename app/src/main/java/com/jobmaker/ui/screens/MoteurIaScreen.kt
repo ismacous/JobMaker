@@ -266,7 +266,14 @@ fun MoteurIaScreen(
                             Text("  Appel en cours...")
                         }
                         is EtatTest.Reussi -> Bandeau(
-                            "Reponse de ${t.modele} en ${t.dureeMs} ms. Tout est pret.",
+                            "Reponse de ${t.modele} en ${t.dureeMs} ms. Tout est pret." +
+                                (
+                                    t.quota?.let {
+                                        "\n\nQuota annonce par le fournisseur pour cette " +
+                                            "cle :\n" + it
+                                    } ?: "\n\nCe fournisseur n'annonce pas le quota restant " +
+                                        "dans ses reponses."
+                                    ),
                             TypeBandeau.SUCCES,
                         )
                         is EtatTest.Echoue -> Bandeau(t.message, TypeBandeau.ERREUR)

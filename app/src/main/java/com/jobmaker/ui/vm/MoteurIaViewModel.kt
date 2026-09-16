@@ -22,7 +22,12 @@ import kotlinx.coroutines.launch
 sealed interface EtatTest {
     data object Repos : EtatTest
     data object EnCours : EtatTest
-    data class Reussi(val dureeMs: Long, val modele: String) : EtatTest
+    data class Reussi(
+        val dureeMs: Long,
+        val modele: String,
+        /** Ce que le fournisseur annonce du quota restant, s'il l'annonce. */
+        val quota: String? = null,
+    ) : EtatTest
     data class Echoue(val message: String) : EtatTest
 }
 
@@ -192,6 +197,7 @@ class MoteurIaViewModel(private val container: AppContainer) : ViewModel() {
         }
         _etat.value = _etat.value.copy(test = EtatTest.EnCours)
         val debut = System.currentTimeMillis()
+        var quota: String? = null
         runCatching {
             container.clientCloud.completer(
                 fournisseur = fournisseur,
@@ -205,11 +211,16 @@ class MoteurIaViewModel(private val container: AppContainer) : ViewModel() {
                 // leur reflexion sur ce budget, et un test trop serre les
                 // faisait echouer alors que la cle etait parfaitement valide.
                 params = GenerationParams.precise(maxTokens = 512),
+                onQuota = { quota = it.resume() },
             )
         }
             .onSuccess {
                 _etat.value = _etat.value.copy(
-                    test = EtatTest.Reussi(System.currentTimeMillis() - debut, modele),
+                    test = EtatTest.Reussi(
+                        dureeMs = System.currentTimeMillis() - debut,
+                        modele = modele,
+                        quota = quota,
+                    ),
                 )
             }
             .onFailure { e ->

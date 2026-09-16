@@ -20,6 +20,34 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
+ * Ce que le fournisseur dit de votre quota, lu dans les en-tetes de sa reponse.
+ *
+ * Les offres gratuites annoncent des chiffres sur leurs pages de documentation,
+ * qui changent souvent et dependent du modele. Plutot que de les recopier dans
+ * l'application, on affiche ce que l'API renvoie pour cette cle-ci, aujourd'hui.
+ */
+data class QuotaObserve(
+    val requetesRestantes: String? = null,
+    val requetesLimite: String? = null,
+    val tokensRestants: String? = null,
+    val tokensLimite: String? = null,
+) {
+    val vide: Boolean
+        get() = listOfNotNull(requetesLimite, tokensLimite).isEmpty()
+
+    /** Une ligne lisible, ou null si le fournisseur n'annonce rien. */
+    fun resume(): String? {
+        if (vide) return null
+        return listOfNotNull(
+            tokensLimite?.let {
+                "tokens : ${tokensRestants ?: "?"} restants sur $it par minute"
+            },
+            requetesLimite?.let { "requetes : ${requetesRestantes ?: "?"} restantes sur $it" },
+        ).joinToString("\n")
+    }
+}
+
+/**
  * Panne d'un moteur distant.
  *
  * [repliPossible] distingue ce qui se resout en changeant de moteur (pas de
@@ -58,6 +86,8 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
         onToken: ((String) -> Unit)? = null,
         /** Prevenu quand l'appel patiente le temps que le quota se renouvelle. */
         onAttente: ((secondes: Int) -> Unit)? = null,
+        /** Recoit ce que le fournisseur annonce du quota restant. */
+        onQuota: ((QuotaObserve) -> Unit)? = null,
         /**
          * Patienter sur un quota epuise plutot que de rendre la main.
          *
@@ -78,7 +108,7 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
             tentative++
             try {
                 return withContext(Dispatchers.IO) {
-                    flux(fournisseur, modeleRetenu, cle, messages, params, extras, onToken)
+                    flux(fournisseur, modeleRetenu, cle, messages, params, extras, onToken, onQuota)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -91,8 +121,12 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
                     extras = false
                     continue
                 }
+                // 503 = modele surcharge cote fournisseur. C'est frequent sur
+                // les offres gratuites aux heures pleines, et cela passe en
+                // quelques secondes : insister coute moins cher que de rendre
+                // la main au petit modele du telephone.
                 if (e.code in 500..599 && tentative <= MAX_TENTATIVES) {
-                    delay(1000L * tentative * tentative)
+                    delay(2000L * tentative * tentative)
                     continue
                 }
 
@@ -167,6 +201,7 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
         params: GenerationParams,
         extras: Boolean,
         onToken: ((String) -> Unit)?,
+        onQuota: ((QuotaObserve) -> Unit)? = null,
     ): String {
         val corps = RequetesCloud.corps(fournisseur, modele, messages, params, extras)
         val requete = Request.Builder()
@@ -180,6 +215,7 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
 
         try {
             appel.execute().use { reponse ->
+                quotaDeclare(reponse)?.let { onQuota?.invoke(it) }
                 if (!reponse.isSuccessful) {
                     // Le corps ne se lit qu'une fois : il porte le message et,
                     // chez Google, l'attente a respecter.
@@ -273,6 +309,21 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
         return b.build()
     }
 
+    /**
+     * Quota annonce par le fournisseur. Groq renseigne ces en-tetes ; Google ne
+     * les envoie pas, auquel cas il n'y a rien a afficher plutot qu'un chiffre
+     * invente.
+     */
+    private fun quotaDeclare(reponse: okhttp3.Response): QuotaObserve? {
+        val q = QuotaObserve(
+            requetesRestantes = reponse.header("x-ratelimit-remaining-requests"),
+            requetesLimite = reponse.header("x-ratelimit-limit-requests"),
+            tokensRestants = reponse.header("x-ratelimit-remaining-tokens"),
+            tokensLimite = reponse.header("x-ratelimit-limit-tokens"),
+        )
+        return q.takeIf { !it.vide }
+    }
+
     /** Refuse toute URL qui n'est pas du HTTPS sur l'hote du fournisseur. */
     private fun verifierUrl(fournisseur: FournisseurCloud, url: String): String {
         require(url.startsWith("https://${fournisseur.hote}/")) {
@@ -310,7 +361,7 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
 
     companion object {
         private const val TAG = "ClientCloud"
-        private const val MAX_TENTATIVES = 2
+        private const val MAX_TENTATIVES = 3
 
         /**
          * Le quota par minute se renouvelle en 60 secondes. Au-dela, ce n'est

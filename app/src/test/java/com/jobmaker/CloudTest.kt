@@ -6,9 +6,11 @@ import com.jobmaker.llm.GenerationParams
 import com.jobmaker.llm.cloud.DialecteCloud
 import com.jobmaker.llm.cloud.ErreurCloud
 import com.jobmaker.llm.cloud.FournisseurCloud
+import com.jobmaker.llm.cloud.QuotaObserve
 import com.jobmaker.llm.cloud.RequetesCloud
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -345,6 +347,31 @@ class CloudTest {
                 enchainer = true,
             ).isEmpty()
         )
+    }
+
+    @Test
+    fun `le budget de sortie ne gonfle que pour les modeles a raisonnement`() {
+        // Les tokens produits comptent dans le quota par minute : gonfler le
+        // budget pour un modele qui n'en a pas besoin rapproche le mur.
+        assertTrue(RequetesCloud.raisonne("openai/gpt-oss-120b"))
+        assertFalse(RequetesCloud.raisonne("qwen/qwen3.8-27b"))
+        assertFalse(RequetesCloud.raisonne("gemini-flash-latest"))
+    }
+
+    @Test
+    fun `le quota annonce par le fournisseur se resume, ou se tait`() {
+        val annonce = QuotaObserve(
+            requetesRestantes = "9 998", requetesLimite = "14 400",
+            tokensRestants = "2 100", tokensLimite = "8 000",
+        )
+        val resume = annonce.resume()
+        assertNotNull(resume)
+        assertTrue(resume!!.contains("8 000"))
+        assertTrue(resume.contains("14 400"))
+
+        // Google n'envoie pas ces en-tetes : mieux vaut ne rien afficher qu'un
+        // chiffre invente.
+        assertNull(QuotaObserve().resume())
     }
 
     @Test

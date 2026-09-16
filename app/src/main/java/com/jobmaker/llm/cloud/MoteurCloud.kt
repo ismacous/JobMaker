@@ -112,14 +112,18 @@ class MoteurCloud(
     }
 
     /**
-     * Les budgets de tokens du pipeline ont ete tailles pour un modele local,
-     * ou chaque token coute des secondes de calcul et de la memoire. A
-     * distance, aucune des deux contraintes ne s'applique, et un modele a
-     * raisonnement depense une partie du budget a reflechir avant d'ecrire une
-     * seule ligne. On double donc, sans plafond genant : on ne paie que les
-     * tokens reellement produits.
+     * Marge de sortie pour les modeles qui reflechissent avant d'ecrire : leur
+     * raisonnement est facture sur le meme budget que la reponse.
+     *
+     * La marge etait du simple au double. C'etait trop : les tokens produits
+     * comptent dans le quota gratuit, qui se mesure a la minute, et gonfler le
+     * budget revenait a rapprocher le mur. Une moitie suffit a laisser un
+     * gpt-oss reflechir puis rediger ; les modeles sans raisonnement gardent le
+     * budget d'origine.
      */
-    private fun budget(demande: Int): Int = (demande * 2).coerceIn(1024, 8192)
+    private fun budget(demande: Int): Int =
+        if (RequetesCloud.raisonne(modeleRetenu)) (demande * 3 / 2).coerceAtMost(8192)
+        else demande
 
     private companion object { const val CONTEXTE_SUPPOSE = 32_768 }
 }
