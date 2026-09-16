@@ -26,6 +26,11 @@ private const val NO_THINK = "/no_think"
  */
 suspend fun <T> MoteurTexte.generateJson(
     serializer: KSerializer<T>,
+    /**
+     * Bloc identique d'un appel a l'autre, place en tete pour etre mis en cache
+     * par le fournisseur. Vide quand l'appel est isole.
+     */
+    prefixe: String = "",
     system: String,
     user: String,
     params: GenerationParams,
@@ -35,7 +40,13 @@ suspend fun <T> MoteurTexte.generateJson(
 ): T {
     val userText = if (suppressReasoning) "$user\n\n$NO_THINK" else user
 
-    val messages = listOf(ChatMessage.system(system), ChatMessage.user(userText))
+    // Le prefixe passe avant tout le reste : un cache de prompt ne retient que
+    // le debut, et seulement s'il est rigoureusement identique.
+    val messages = buildList {
+        if (prefixe.isNotBlank()) add(ChatMessage.system(prefixe))
+        add(ChatMessage.system(system))
+        add(ChatMessage.user(userText))
+    }
     // sortieJson n'a d'effet que sur les moteurs distants, qui savent contraindre
     // la sortie : la passe de reparation ci-dessous ne s'y declenche plus.
     val raw = completer(messages, params.copy(sortieJson = true), onLecturePrompt, onToken)

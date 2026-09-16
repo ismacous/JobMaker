@@ -47,6 +47,30 @@ le CV. Un CV plus court mais vrai vaut infiniment mieux qu'un CV gonfle : le men
 se voit en entretien et coute le poste.
 """
 
+    /**
+     * Le bloc que les trois etapes ont en commun, mot pour mot.
+     *
+     * Les fournisseurs mettent en cache le debut d'un prompt quand il est
+     * rigoureusement identique d'un appel a l'autre, et -- c'est tout
+     * l'interet -- les tokens ainsi mis en cache ne comptent plus dans le quota
+     * par minute. Le profil du candidat pese a lui seul 2 500 tokens et
+     * repartait a chaque etape ; place ici, en tete et inchange, il n'est
+     * facture qu'une fois.
+     *
+     * D'ou une contrainte a respecter en modifiant ce fichier : ce bloc doit
+     * rester byte pour byte le meme entre les etapes d'une meme candidature.
+     * La moindre variation -- une date, un compteur, un profil resume pour une
+     * etape et complet pour une autre -- suffit a manquer le cache.
+     */
+    fun prefixeCommun(profil: String) = """
+$REGLE_VERITE
+$REGLES_JSON
+
+--- PROFIL DU CANDIDAT (seule source de faits) ---
+$profil
+--- FIN DU PROFIL ---
+""".trimIndent()
+
     // -----------------------------------------------------------------------
     // Etape 1 fusionnee : analyse de l'annonce ET strategie
     //
@@ -80,8 +104,6 @@ decides de l'angle de la candidature :
 - Recense honnetement les ecarts, et pour chacun la meilleure reponse VRAIE.
 - Choisis un ton adapte au secteur : sobre pour le public et la banque, direct pour
   l'industrie et la logistique, chaleureux pour le commerce et le soin.
-$REGLE_VERITE
-$REGLES_JSON
 
 Schema exact a produire :
 {
@@ -123,16 +145,12 @@ Schema exact a produire :
 }
 """.trimIndent()
 
-    fun preparationUser(offre: String, profil: String) = """
+    fun preparationUser(offre: String) = """
 --- ANNONCE ---
 ${offre.trim()}
 --- FIN DE L'ANNONCE ---
 
---- PROFIL DU CANDIDAT (seule source de faits) ---
-$profil
---- FIN DU PROFIL ---
-
-Analyse l'annonce, puis etablis la strategie de candidature.
+Analyse l'annonce, puis etablis la strategie de candidature a partir du profil.
 """.trimIndent()
 
     // -----------------------------------------------------------------------
@@ -167,8 +185,6 @@ LA LETTRE. Quatre paragraphes, 250 a 330 mots au total :
 Jamais de formule toute faite ("vivement interesse", "grande motivation", "votre
 prestigieuse entreprise"). Pas de repetition du CV : la lettre ajoute le pourquoi.
 Si l'entreprise n'est pas nommee dans l'annonce, ecris sans jamais la nommer.
-$REGLE_VERITE
-$REGLES_JSON
 
 NE FONT PAS PARTIE de ta reponse, l'application les inserant elle-meme depuis le
 profil pour qu'ils ne puissent pas etre alteres : le nom, le telephone, l'adresse,
@@ -208,7 +224,6 @@ Schema exact a produire :
     fun redactionUser(
         analyse: JobAnalysis,
         strategie: Strategy,
-        profil: String,
         nomComplet: String,
         langue: String,
         disponibilite: String,
@@ -219,9 +234,6 @@ ${analyse.resume()}
 
 --- STRATEGIE RETENUE ---
 ${strategie.resume()}
-
---- PROFIL DU CANDIDAT (seule source de faits) ---
-$profil
 
 Signature a utiliser : $nomComplet
 ${if (disponibilite.isNotBlank()) "Disponibilite declaree : $disponibilite" else ""}
@@ -262,7 +274,6 @@ AVANT correction, pas la tienne.
 
 Si le CV ou la lettre n'appelle aucune correction, renvoie-le a l'identique. Ne renvoie
 jamais un champ vide : un document que tu ne corriges pas est recopie tel quel.
-$REGLES_JSON
 
 Schema exact a produire :
 {
@@ -286,16 +297,12 @@ Schema exact a produire :
 
     fun revisionUser(
         analyse: JobAnalysis,
-        profil: String,
         cvJson: String,
         lettreJson: String,
         langue: String,
     ) = """
 --- ANNONCE VISEE ---
 ${analyse.resume()}
-
---- PROFIL (seule source de faits) ---
-$profil
 
 --- CV ACTUEL ---
 $cvJson

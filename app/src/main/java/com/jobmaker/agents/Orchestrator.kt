@@ -97,10 +97,17 @@ class Orchestrator(
             send(PipelineEvent.Modele(prep.nomModele))
 
             val digest = digestAdapte(moteur, profile, prep.tailleContexte)
+
+            // Calcule une fois, envoye tel quel aux trois etapes : c'est ce qui
+            // permet au fournisseur de le mettre en cache, et aux tokens du
+            // profil de ne compter qu'une seule fois dans le quota.
+            val prefixe = Prompts.prefixeCommun(digest.texte)
+
             val dossier = moteur.generateJson(
                 serializer = DossierPreparation.serializer(),
+                prefixe = prefixe,
                 system = Prompts.preparationSystem,
-                user = Prompts.preparationUser(offre, digest.texte),
+                user = Prompts.preparationUser(offre),
                 params = GenerationParams.precise(maxTokens = 1800),
                 suppressReasoning = prep.brideRaisonnement,
                 onLecturePrompt = { lus, t, ms -> trySend(PipelineEvent.Lecture(lus, t, ms)) },
@@ -125,9 +132,10 @@ class Orchestrator(
 
             val rediges = moteur.generateJson(
                 serializer = DocumentsRediges.serializer(),
+                prefixe = prefixe,
                 system = Prompts.redactionSystem,
                 user = Prompts.redactionUser(
-                    analyse, strategie, digest.texte,
+                    analyse, strategie,
                     profile.identite.nomComplet, langue,
                     profile.recherche.disponibilite, settings.cvUnePage,
                 ),
@@ -144,7 +152,7 @@ class Orchestrator(
 
             if (relecture) {
                 val etapes = relireEtCorriger(
-                    moteur, profile, analyse, langue, cv, lettre,
+                    moteur, profile, analyse, langue, cv, lettre, prefixe,
                     premiereEtape = 3, total = total,
                 ) { trySend(it) }
                 cv = etapes.cv
@@ -208,9 +216,10 @@ class Orchestrator(
                 trySend(PipelineEvent.Avertissement(it))
             }
             val langue = candidature.cv.langue.ifBlank { "fr" }
+            val prefixe = Prompts.prefixeCommun(ProfileSerializer.digest(profile).texte)
             val resultat = relireEtCorriger(
                 moteur, profile, candidature.analyse, langue,
-                candidature.cv, candidature.lettre,
+                candidature.cv, candidature.lettre, prefixe,
                 premiereEtape = 1, total = 1,
             ) { trySend(it) }
             resultat.avertissement?.let { send(PipelineEvent.Avertissement(it)) }
@@ -238,6 +247,7 @@ class Orchestrator(
         langue: String,
         cvInitial: CvContent,
         lettreInitiale: LetterContent,
+        prefixe: String,
         premiereEtape: Int,
         total: Int,
         emettre: (PipelineEvent) -> Unit,
@@ -259,16 +269,13 @@ class Orchestrator(
         // gratuit compte en tokens par minute, cela brulait la moitie du
         // budget d'une candidature pour rien.
         //
-        // Le profil part ici dans sa version courte : le modele n'en a besoin
-        // que pour reperer les inventions, et FactCheck fait de toute facon ce
-        // travail mecaniquement, sans jamais rater un employeur ou un diplome.
-        val profilCourt = ProfileSerializer.digestCourt(profile).texte
         val revision = runCatching {
             moteur.generateJson(
                 serializer = Revision.serializer(),
+                prefixe = prefixe,
                 system = Prompts.revisionSystem,
                 user = Prompts.revisionUser(
-                    analyse, profilCourt,
+                    analyse,
                     prettyJson.encodeToString(cv), prettyJson.encodeToString(lettre), langue,
                 ),
                 params = GenerationParams.writing(maxTokens = 3400),

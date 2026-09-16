@@ -126,6 +126,32 @@ deux fois les mêmes données :
 Mesuré sur une annonce de 3 600 caractères : **~30 000 tokens par candidature
 avant, ~19 000 après.**
 
+### Le profil passe en tête, identique, pour être mis en cache
+
+Restait le fond du problème : l'API est sans mémoire. Chaque appel doit
+réexpédier le profil, puisque le serveur ne garde rien entre deux requêtes — et
+le stocker sur le téléphone n'y change rien, il y est déjà.
+
+Les fournisseurs répondent à cela par le **cache de prompt** : le début d'un
+prompt rigoureusement identique d'un appel à l'autre est mémorisé quelques
+heures, et — c'est tout l'intérêt ici — **les tokens ainsi mis en cache ne
+comptent plus dans le quota par minute.**
+
+Les trois appels commencent donc par le même bloc, `Prompts.prefixeCommun` :
+règle de vérité, règles de format, profil complet. Les consignes propres à
+l'étape et les données variables viennent après. Le profil n'est facturé qu'une
+fois sur les trois.
+
+La contrainte, elle, est de discipline : **ce bloc doit rester byte pour byte le
+même** entre les étapes d'une même candidature. Une date, un compteur, un profil
+résumé pour une étape et complet pour une autre suffisent à manquer le cache,
+sans que rien ne casse visiblement — seul le quota part en fumée. `PromptsTest`
+garde cet invariant.
+
+Le cache reste une optimisation opportuniste : tous les modèles ne le proposent
+pas, et le premier appel paie plein tarif. Il ne remplace donc pas la réduction
+du nombre d'appels, il s'y ajoute.
+
 ### JSON contraint par l'API quand elle sait le faire
 
 En local, le JSON produit par un modèle de 4 milliards de paramètres est
