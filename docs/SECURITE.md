@@ -132,6 +132,19 @@ restante est le téléchargement des modèles.
 C'est la raison pour laquelle **Groq est le choix par défaut**, et pour laquelle
 le mode « sur l'appareil » reste disponible sans condition.
 
+### Plusieurs clés en même temps
+
+Le coffre stocke **une clé par fournisseur**, chacune chiffrée séparément :
+enregistrer une clé Gemini n'efface pas celle de Groq. Quand un fournisseur
+sature, l'application passe au suivant dont une clé est enregistrée, et ne
+retombe sur le modèle du téléphone qu'en dernier recours.
+
+Conséquence à avoir en tête : **chaque fournisseur de la chaîne peut recevoir
+vos données**, selon les règles du tableau ci-dessus. Une génération commencée
+chez Groq et terminée chez Gemini aura envoyé votre profil aux deux. L'écran
+*Moteur d'IA* affiche la chaîne exacte, dans l'ordre, et l'enchaînement se
+désactive d'un interrupteur si vous préférez un seul destinataire.
+
 ---
 
 ## Ce que cette architecture ne protège pas

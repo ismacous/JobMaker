@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jobmaker.data.prefs.Settings
 import com.jobmaker.di.AppContainer
+import com.jobmaker.llm.ChaineMoteurs
 import com.jobmaker.llm.ChatMessage
 import com.jobmaker.llm.GenerationParams
 import com.jobmaker.llm.ModeMoteur
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -49,6 +51,31 @@ class MoteurIaViewModel(private val container: AppContainer) : ViewModel() {
 
     val modelesLocaux = container.modelManager.installed
 
+    /**
+     * La chaine reellement suivie en cas de panne, telle que la fabrique la
+     * montera. Calculee par la meme fonction que le moteur, pour que l'ecran ne
+     * puisse pas decrire autre chose que ce qui se passe.
+     */
+    val chaine: StateFlow<List<String>> = combine(
+        container.settingsRepository.settings,
+        container.coffreCles.empreintes,
+        container.modelManager.installed,
+    ) { reglages, cles, locaux ->
+        val fournisseurs = ChaineMoteurs.fournisseurs(
+            actif = reglages.fournisseurCloud,
+            avecCle = cles.keys,
+            enchainer = reglages.enchainerFournisseurs,
+        )
+        buildList {
+            fournisseurs.forEach { f ->
+                add("${f.nom} - ${reglages.modeleCloudPour(f)}")
+            }
+            if (reglages.repliLocal) {
+                locaux.firstOrNull()?.let { add("${it.displayName} - sur le telephone") }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     private val _etat = MutableStateFlow(EtatMoteurIa())
     val etat: StateFlow<EtatMoteurIa> = _etat.asStateFlow()
 
@@ -72,6 +99,10 @@ class MoteurIaViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setRepliLocal(actif: Boolean) = lance {
         container.settingsRepository.setRepliLocal(actif)
+    }
+
+    fun setEnchainer(actif: Boolean) = lance {
+        container.settingsRepository.setEnchainerFournisseurs(actif)
     }
 
     // -----------------------------------------------------------------------

@@ -148,10 +148,16 @@ disponibles avec votre clé.
 
 Ensuite, plus besoin d'internet du tout.
 
-> Les deux se combinent : avec une clé **et** un modèle installé, l'option
-> *Filet de sécurité* termine la candidature sur le téléphone si le réseau tombe
-> ou si le quota gratuit est épuisé en pleine génération, au lieu de tout
-> perdre.
+> Les deux se combinent, et les clés s'additionnent : le coffre en garde une par
+> fournisseur. Quand le quota de l'un est épuisé, *Filet de sécurité* passe au
+> suivant dont vous avez enregistré une clé, puis au modèle du téléphone en
+> dernier recours — au lieu de tout perdre. L'écran *Moteur d'IA* affiche la
+> chaîne exacte.
+>
+> Utile à savoir : les quotas gratuits se comptent en **tokens par minute**, pas
+> en requêtes. Groq va de 6 000 à 30 000 selon le modèle (les plus gros sont les
+> plus serrés), Gemini annonce 1 million. Sur une annonce longue, c'est cette
+> limite-là que l'on atteint.
 
 ### Si le téléchargement du modèle échoue (erreur 404)
 

@@ -72,6 +72,7 @@ fun MoteurIaScreen(
     val etat by vm.etat.collectAsState()
     val empreintes by vm.empreintes.collectAsState()
     val modelesLocaux by vm.modelesLocaux.collectAsState()
+    val chaine by vm.chaine.collectAsState()
     val liens = LocalUriHandler.current
 
     val fournisseur = reglages.fournisseurCloud
@@ -273,36 +274,55 @@ fun MoteurIaScreen(
                 }
 
                 // -------------------------------------------------------------
-                // Repli
+                // Chaine de secours
                 // -------------------------------------------------------------
-                SectionCarte("Filet de securite") {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                        Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text(
-                                "Repli sur le modele du telephone",
-                                style = MaterialTheme.typography.titleSmall,
-                            )
-                            Text(
-                                "Si le reseau tombe ou si le quota gratuit est epuise en " +
-                                    "pleine generation, l'application termine la candidature " +
-                                    "avec le modele installe au lieu de tout perdre. " +
-                                    (
-                                        if (modelesLocaux.isEmpty()) {
-                                            "Aucun modele n'est installe : ce filet est inactif."
-                                        } else {
-                                            "Modele de secours : " +
-                                                modelesLocaux.first().displayName + "."
-                                        }
-                                        ),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = reglages.repliLocal,
-                            onCheckedChange = vm::setRepliLocal,
+                SectionCarte(
+                    "Filet de securite",
+                    sousTitre = "Ce qui prend le relais quand un fournisseur sature",
+                ) {
+                    if (chaine.size > 1) {
+                        Bandeau(
+                            "Ordre d'essai :\n" +
+                                chaine.mapIndexed { i, nom -> "${i + 1}. $nom" }
+                                    .joinToString("\n"),
+                            TypeBandeau.SUCCES,
+                        )
+                    } else {
+                        Bandeau(
+                            "Un seul moteur disponible : si son quota est atteint, la " +
+                                "generation s'arrete. Enregistrez une cle chez un autre " +
+                                "fournisseur, ou gardez un modele installe sur le telephone.",
+                            TypeBandeau.ALERTE,
                         )
                     }
+
+                    LigneBascule(
+                        titre = "Enchainer les fournisseurs",
+                        detail = "Quand le quota du fournisseur en cours est epuise, " +
+                            "l'application passe au suivant dont vous avez enregistre une " +
+                            "cle, au lieu de rendre la main au telephone pendant qu'une " +
+                            "autre cle dort. La qualite ne baisse pas.",
+                        valeur = reglages.enchainerFournisseurs,
+                        onChange = vm::setEnchainer,
+                    )
+
+                    LigneBascule(
+                        titre = "Repli sur le modele du telephone",
+                        detail = "Dernier maillon : si plus aucun fournisseur ne repond, " +
+                            "l'application termine la candidature avec le modele installe " +
+                            "au lieu de tout perdre. " +
+                            (
+                                if (modelesLocaux.isEmpty()) {
+                                    "Aucun modele n'est installe : ce maillon est absent."
+                                } else {
+                                    "Modele de secours : " +
+                                        modelesLocaux.first().displayName + "."
+                                }
+                                ),
+                        valeur = reglages.repliLocal,
+                        onChange = vm::setRepliLocal,
+                    )
+
                     if (modelesLocaux.isEmpty()) {
                         OutlinedButton(
                             onClick = onOuvrirModeles,
@@ -372,6 +392,26 @@ fun MoteurIaScreen(
             },
             onFermer = { choixModeleOuvert = false },
         )
+    }
+}
+
+@Composable
+private fun LigneBascule(
+    titre: String,
+    detail: String,
+    valeur: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(titre, style = MaterialTheme.typography.titleSmall)
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = valeur, onCheckedChange = onChange)
     }
 }
 

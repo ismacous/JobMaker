@@ -34,7 +34,12 @@ data class Settings(
     val fournisseurCloud: FournisseurCloud = FournisseurCloud.GROQ,
     /** Modele choisi chez chaque fournisseur. Absent = modele par defaut. */
     val modeleCloud: Map<FournisseurCloud, String> = emptyMap(),
-    /** Repli sur le modele du telephone si le distant flanche en cours de route. */
+    /**
+     * Passe au fournisseur suivant quand celui en cours sature, au lieu de
+     * rendre la main au telephone pendant qu'une autre cle dort.
+     */
+    val enchainerFournisseurs: Boolean = true,
+    /** Repli sur le modele du telephone quand plus aucun fournisseur ne repond. */
     val repliLocal: Boolean = true,
     /** Modele affecte a chaque agent. Vide = premier modele installe. */
     val modeleParRole: Map<AgentRole, String> = emptyMap(),
@@ -80,7 +85,8 @@ data class Settings(
 fun Settings.configMoteur() = ConfigMoteur(
     mode = modeMoteur,
     fournisseur = fournisseurCloud,
-    modeleCloud = modeleCloudPour(fournisseurCloud),
+    modelesCloud = modeleCloud,
+    enchainerFournisseurs = enchainerFournisseurs,
     repliLocal = repliLocal,
     modeleParRole = modeleParRole,
     tailleContexte = tailleContexte,
@@ -106,6 +112,7 @@ class SettingsRepository(private val context: Context) {
             }.getOrDefault(ModeMoteur.CLOUD),
             fournisseurCloud = FournisseurCloud.parNom(this[KEY_FOURNISSEUR]),
             modeleCloud = modelesCloud,
+            enchainerFournisseurs = this[KEY_ENCHAINER] ?: true,
             repliLocal = this[KEY_REPLI_LOCAL] ?: true,
             modeleParRole = roles,
             tailleContexte = this[KEY_CONTEXTE] ?: 6144,
@@ -138,6 +145,9 @@ class SettingsRepository(private val context: Context) {
     suspend fun setRepliLocal(value: Boolean) =
         context.dataStore.edit { it[KEY_REPLI_LOCAL] = value }
 
+    suspend fun setEnchainerFournisseurs(value: Boolean) =
+        context.dataStore.edit { it[KEY_ENCHAINER] = value }
+
     suspend fun setModelePourRole(role: AgentRole, modelId: String) =
         context.dataStore.edit { it[roleKey(role)] = modelId }
 
@@ -167,6 +177,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_MODE_MOTEUR = stringPreferencesKey("mode_moteur")
         val KEY_FOURNISSEUR = stringPreferencesKey("fournisseur_cloud")
         val KEY_REPLI_LOCAL = booleanPreferencesKey("repli_local")
+        val KEY_ENCHAINER = booleanPreferencesKey("enchainer_fournisseurs")
         val KEY_CONTEXTE = intPreferencesKey("taille_contexte")
         val KEY_THREADS = intPreferencesKey("threads")
         val KEY_GPU = intPreferencesKey("couches_gpu")

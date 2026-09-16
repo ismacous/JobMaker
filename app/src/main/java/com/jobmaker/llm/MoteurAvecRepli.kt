@@ -4,13 +4,16 @@ import android.util.Log
 import com.jobmaker.llm.cloud.PanneCloud
 
 /**
- * Enveloppe un moteur distant d'un filet de securite local.
+ * Enveloppe un moteur d'un filet de securite : le suivant de la chaine.
  *
  * Le cas vise est banal : on lance une candidature dans le metro, le reseau
  * tombe a la station suivante, ou le quota gratuit du jour vient d'etre epuise.
- * Sans filet, tout est perdu et il faut recommencer. Avec, l'etape en cours
- * repart sur le modele du telephone et la candidature aboutit -- plus lentement,
- * en le disant clairement.
+ * Sans filet, tout est perdu et il faut recommencer.
+ *
+ * Le secours est soit un autre fournisseur -- passer de Groq a Gemini ne coute
+ * rien en qualite et evite de retomber sur le petit modele du telephone alors
+ * qu'une autre cle attend sans servir -- soit, en bout de chaine, le modele
+ * embarque. Ces decorateurs s'emboitent : Groq(Gemini(telephone)).
  *
  * La bascule ne se declenche que sur une panne passagere ([PanneCloud.repliPossible]).
  * Une cle invalide ou un modele inexistant continuent de remonter a
@@ -71,8 +74,12 @@ class MoteurAvecRepli(
         bascule = true
         val pret = secours.preparer(dernierRole)
         onBascule(
-            "${cause.message} Le modele du telephone (${pret.nomModele}) prend le relais " +
-                "pour la suite : c'est plus lent, mais la candidature va au bout."
+            cause.message + " " + if (secours.distant) {
+                "${pret.nomModele} prend le relais pour la suite, sans perte de qualite."
+            } else {
+                "Le modele du telephone (${pret.nomModele}) prend le relais pour la " +
+                    "suite : c'est plus lent, mais la candidature va au bout."
+            }
         )
         return pret
     }

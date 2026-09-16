@@ -21,11 +21,23 @@ class FabriqueMoteur(
 
     suspend fun creer(config: ConfigMoteur, onAvertissement: (String) -> Unit): MoteurTexte {
         val local = { MoteurLocal(runtime, modelManager, config) }
+        val modeleInstalle = modelManager.installed.value.isNotEmpty()
         if (config.mode == ModeMoteur.APPAREIL) return local()
 
-        val cle = lireCle(config.fournisseur)?.takeIf { it.isNotBlank() }
-        if (cle == null) {
-            if (modelManager.installed.value.isNotEmpty()) {
+        // Les cles sont relues a chaque generation : une cle ajoutee dans les
+        // reglages entre dans la chaine immediatement.
+        val cles = FournisseurCloud.entries
+            .mapNotNull { f -> lireCle(f)?.takeIf { it.isNotBlank() }?.let { f to it } }
+            .toMap()
+
+        val chaine = ChaineMoteurs.fournisseurs(
+            actif = config.fournisseur,
+            avecCle = cles.keys,
+            enchainer = config.enchainerFournisseurs,
+        )
+
+        if (chaine.isEmpty()) {
+            if (modeleInstalle) {
                 onAvertissement(
                     "Aucune cle enregistree pour ${config.fournisseur.nom} : la generation " +
                         "se fait sur le telephone. Ajoutez votre cle gratuite dans " +
@@ -40,19 +52,31 @@ class FabriqueMoteur(
             )
         }
 
-        val distant = MoteurCloud(
-            client = client,
-            fournisseur = config.fournisseur,
-            modele = config.modeleCloud,
-            cle = cle,
-            onInfo = onAvertissement,
-        )
-
-        val repliDisponible = config.repliLocal && modelManager.installed.value.isNotEmpty()
-        return if (repliDisponible) {
-            MoteurAvecRepli(distant, local(), onAvertissement)
-        } else {
-            distant
+        if (chaine.first() != config.fournisseur) {
+            onAvertissement(
+                "Aucune cle pour ${config.fournisseur.nom} : ${chaine.first().nom} prend " +
+                    "sa place pour cette generation."
+            )
         }
+
+        // La chaine se monte par la fin : chaque fournisseur enveloppe tout ce
+        // qui vient apres lui. Groq(Gemini(telephone)) plutot qu'une boucle de
+        // secours a ecrire -- MoteurAvecRepli sait deja passer au suivant, il
+        // suffit de l'emboiter.
+        var moteur: MoteurTexte? =
+            if (config.repliLocal && modeleInstalle) local() else null
+
+        for (f in chaine.reversed()) {
+            val distant = MoteurCloud(
+                client = client,
+                fournisseur = f,
+                modele = config.modelePour(f),
+                cle = cles.getValue(f),
+                onInfo = onAvertissement,
+            )
+            moteur = moteur?.let { MoteurAvecRepli(distant, it, onAvertissement) } ?: distant
+        }
+
+        return moteur ?: local()
     }
 }

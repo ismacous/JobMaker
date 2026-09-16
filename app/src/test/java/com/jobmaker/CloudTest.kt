@@ -1,5 +1,6 @@
 package com.jobmaker
 
+import com.jobmaker.llm.ChaineMoteurs
 import com.jobmaker.llm.ChatMessage
 import com.jobmaker.llm.GenerationParams
 import com.jobmaker.llm.cloud.DialecteCloud
@@ -258,6 +259,63 @@ class CloudTest {
         assertFalse(f.formatPlausible("trop-court"))
         assertFalse(f.formatPlausible("gsk_ avec un espace au milieu"))
         assertTrue(f.formatPlausible("gsk_0123456789abcdef0123456789abcdef"))
+    }
+
+    // -----------------------------------------------------------------------
+    // Chaine de secours
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `le fournisseur choisi passe en premier, les autres derriere`() {
+        val chaine = ChaineMoteurs.fournisseurs(
+            actif = FournisseurCloud.GEMINI,
+            avecCle = setOf(FournisseurCloud.GROQ, FournisseurCloud.GEMINI),
+            enchainer = true,
+        )
+        assertEquals(listOf(FournisseurCloud.GEMINI, FournisseurCloud.GROQ), chaine)
+    }
+
+    @Test
+    fun `un fournisseur sans cle ne peut pas servir de secours`() {
+        val chaine = ChaineMoteurs.fournisseurs(
+            actif = FournisseurCloud.GROQ,
+            avecCle = setOf(FournisseurCloud.GROQ),
+            enchainer = true,
+        )
+        assertEquals(listOf(FournisseurCloud.GROQ), chaine)
+    }
+
+    @Test
+    fun `sans enchainement, seul le fournisseur choisi est essaye`() {
+        val chaine = ChaineMoteurs.fournisseurs(
+            actif = FournisseurCloud.GROQ,
+            avecCle = FournisseurCloud.entries.toSet(),
+            enchainer = false,
+        )
+        assertEquals(listOf(FournisseurCloud.GROQ), chaine)
+    }
+
+    @Test
+    fun `un fournisseur choisi sans cle laisse la place a celui qui en a une`() {
+        // Cas reel : on selectionne Gemini, on oublie d'enregistrer sa cle.
+        // Mieux vaut generer avec Groq que ne rien generer du tout.
+        val chaine = ChaineMoteurs.fournisseurs(
+            actif = FournisseurCloud.GEMINI,
+            avecCle = setOf(FournisseurCloud.GROQ),
+            enchainer = true,
+        )
+        assertEquals(listOf(FournisseurCloud.GROQ), chaine)
+    }
+
+    @Test
+    fun `aucune cle nulle part donne une chaine vide`() {
+        assertTrue(
+            ChaineMoteurs.fournisseurs(
+                actif = FournisseurCloud.GROQ,
+                avecCle = emptySet(),
+                enchainer = true,
+            ).isEmpty()
+        )
     }
 
     @Test
