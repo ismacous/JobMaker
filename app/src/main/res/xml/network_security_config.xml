@@ -8,7 +8,7 @@
 
   Seules les autorites de certification du systeme sont acceptees, pas celles
   installees par l'utilisateur : cela empeche qu'un certificat ajoute sur le
-  telephone -- volontairement ou non -- permette de lire les requetes, donc le
+  telephone, volontairement ou non, permette de lire les requetes, donc le
   profil et la cle d'API qui y transitent.
 -->
 <network-security-config>

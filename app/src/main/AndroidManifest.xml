@@ -2,8 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-      Reseau : telechargement des modeles depuis HuggingFace, et -- si
-      l'utilisateur a choisi ce moteur dans Reglages > Moteur d'IA -- appels
+      Reseau : telechargement des modeles depuis HuggingFace, et, si
+      l'utilisateur a choisi ce moteur dans Reglages / Moteur d'IA, appels
       a l'API distante qui redige le CV. En mode "sur l'appareil", aucune
       donnee personnelle ne circule.
     -->
