@@ -154,10 +154,16 @@ Ensuite, plus besoin d'internet du tout.
 > dernier recours — au lieu de tout perdre. L'écran *Moteur d'IA* affiche la
 > chaîne exacte.
 >
-> Utile à savoir : les quotas gratuits se comptent en **tokens par minute**, pas
-> en requêtes. Groq va de 6 000 à 30 000 selon le modèle (les plus gros sont les
-> plus serrés), Gemini annonce 1 million. Sur une annonce longue, c'est cette
-> limite-là que l'on atteint.
+> Utile à savoir : les offres gratuites limitent sur **deux axes à la fois**, et
+> les deux fournisseurs sont complémentaires. Groq est généreux en requêtes par
+> jour mais serré en tokens par minute — c'est ce mur-là que l'on touche sur une
+> longue annonce. Gemini fait l'inverse : très large en tokens par minute, mais
+> les requêtes se comptent en centaines par jour. Enregistrer les deux clés fait
+> disparaître les deux murs.
+>
+> (Le million de tokens souvent cité pour Gemini est sa **fenêtre de contexte** —
+> ce qu'il peut lire en une fois — pas un quota par minute. Les chiffres exacts
+> changent selon le modèle et la génération : la page du fournisseur fait foi.)
 
 ### Si le téléchargement du modèle échoue (erreur 404)
 

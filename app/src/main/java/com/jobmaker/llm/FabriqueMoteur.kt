@@ -73,6 +73,10 @@ class FabriqueMoteur(
                 modele = config.modelePour(f),
                 cle = cles.getValue(f),
                 onInfo = onAvertissement,
+                // Seul le dernier fournisseur patiente sur un quota epuise :
+                // tant qu'il en reste un autre, basculer est instantane alors
+                // qu'attendre coute une minute.
+                dernierDeLaChaine = f == chaine.last(),
             )
             moteur = moteur?.let { MoteurAvecRepli(distant, it, onAvertissement) } ?: distant
         }

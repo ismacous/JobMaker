@@ -31,6 +31,13 @@ enum class FournisseurCloud(
     val urlCle: String,
     /** Debut attendu de la cle. Vide si le fournisseur n'en impose pas. */
     val prefixeCle: String,
+    /**
+     * Ordre de grandeur, pas un contrat. Les fournisseurs revoient leurs offres
+     * gratuites plusieurs fois par an et les chiffres exacts dependent du modele
+     * choisi : les figer ici serait se tromper a coup sur. La page du
+     * fournisseur fait foi, et l'application lit de toute facon l'attente que
+     * l'API lui indique.
+     */
     val quota: String,
     val resume: String,
     /** Ce que le fournisseur fait des donnees envoyees, sur son offre gratuite. */
@@ -43,9 +50,9 @@ enum class FournisseurCloud(
         modeleParDefaut = "openai/gpt-oss-120b",
         urlCle = "https://console.groq.com/keys",
         prefixeCle = "gsk_",
-        quota = "14 400 requetes par jour, mais surtout 6 000 a 30 000 tokens par " +
-            "minute selon le modele -- c'est cette limite-la que l'on atteint, les " +
-            "gros modeles etant les plus serres",
+        quota = "genereux en requetes (des milliers par jour), serre en tokens par " +
+            "minute, d'autant plus que le modele est gros. C'est cette limite-la " +
+            "qui se declenche sur une longue annonce",
         resume = "Le plus rapide : quelques secondes pour un CV complet. " +
             "Inscription par e-mail, sans carte bancaire.",
         politiqueDonnees = "Groq annonce ne pas entrainer ses modeles sur le contenu " +
@@ -58,8 +65,9 @@ enum class FournisseurCloud(
         modeleParDefaut = "gemini-flash-latest",
         urlCle = "https://aistudio.google.com/apikey",
         prefixeCle = "AIza",
-        quota = "environ 15 requetes par minute, 1 500 par jour et 1 million de " +
-            "tokens par minute -- la plus confortable des trois sur les gros textes",
+        quota = "l'inverse de Groq : tres large en tokens par minute, mais les " +
+            "requetes se comptent en centaines par jour. Une longue annonce passe " +
+            "sans probleme ; c'est le nombre de candidatures quotidiennes qui borne",
         resume = "La meilleure qualite de redaction des trois, et le seul a " +
             "garantir un JSON conforme au schema demande.",
         politiqueDonnees = "Attention : sur l'offre GRATUITE, Google se reserve le droit " +

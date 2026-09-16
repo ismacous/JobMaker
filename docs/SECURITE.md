@@ -125,9 +125,14 @@ restante est le téléchargement des modèles.
 
 | Fournisseur | Offre gratuite | Données |
 |---|---|---|
-| **Groq** | ~30 req/min, 14 400/jour | Annonce ne pas entraîner ses modèles sur le contenu envoyé par l'API. |
-| **Google Gemini** | ~15 req/min, 1 500/jour | **Sur l'offre gratuite**, Google se réserve le droit de faire relire les échanges par des humains et de s'en servir pour améliorer ses modèles. |
-| **OpenRouter** | variable selon le modèle | Dépend du modèle ; les modèles `:free` sont souvent fournis en échange de l'usage des données. |
+| **Groq** | Généreux en requêtes/jour, serré en tokens/minute | Annonce ne pas entraîner ses modèles sur le contenu envoyé par l'API. |
+| **Google Gemini** | L'inverse : large en tokens/minute, centaines de requêtes/jour | **Sur l'offre gratuite**, Google se réserve le droit de faire relire les échanges par des humains et de s'en servir pour améliorer ses modèles. |
+| **OpenRouter** | Variable selon le modèle | Dépend du modèle ; les modèles `:free` sont souvent fournis en échange de l'usage des données. |
+
+Les chiffres exacts changent selon le modèle et la génération, plusieurs fois par
+an : la page du fournisseur fait foi. L'application ne les code pas en dur — elle
+lit l'attente que l'API lui indique (en-tête `Retry-After` chez Groq, `retryDelay`
+dans le corps de l'erreur chez Google) et s'y conforme.
 
 C'est la raison pour laquelle **Groq est le choix par défaut**, et pour laquelle
 le mode « sur l'appareil » reste disponible sans condition.

@@ -27,6 +27,12 @@ class MoteurCloud(
     private val cle: String,
     /** Remonte a l'ecran ce que l'utilisateur doit savoir pendant la generation. */
     private val onInfo: ((String) -> Unit)? = null,
+    /**
+     * Vrai si ce moteur est le dernier fournisseur de la chaine. Lui seul
+     * patiente quand un quota est epuise : les autres rendent la main
+     * immediatement, parce que passer au suivant ne coute rien.
+     */
+    private val dernierDeLaChaine: Boolean = true,
 ) : MoteurTexte {
 
     private val modeleRetenu = modele.ifBlank { fournisseur.modeleParDefaut }
@@ -78,6 +84,7 @@ class MoteurCloud(
             params = params.copy(maxTokens = budget(params.maxTokens)),
             onToken = onToken,
             onAttente = { secondes -> annoncerAttente(secondes) },
+            attendreSurQuota = dernierDeLaChaine,
         )
     }
 
@@ -98,8 +105,9 @@ class MoteurCloud(
                 "minute, et votre annonce en consomme beaucoup. L'application attend " +
                 "le renouvellement (environ ${secondes} s) entre les etapes plutot que " +
                 "de basculer sur le modele du telephone. C'est normal, la generation " +
-                "suit son cours.\n\nPour aller plus vite : un modele plus petit " +
-                "(openai/gpt-oss-20b) a un quota par minute plus large."
+                "suit son cours.\n\nPour ne plus attendre : enregistrez une cle chez " +
+                "un deuxieme fournisseur (elle prend le relais instantanement), ou " +
+                "choisissez un modele plus petit, dont le quota par minute est plus large."
         )
     }
 

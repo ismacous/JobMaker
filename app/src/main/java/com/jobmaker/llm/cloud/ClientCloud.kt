@@ -58,6 +58,14 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
         onToken: ((String) -> Unit)? = null,
         /** Prevenu quand l'appel patiente le temps que le quota se renouvelle. */
         onAttente: ((secondes: Int) -> Unit)? = null,
+        /**
+         * Patienter sur un quota epuise plutot que de rendre la main.
+         *
+         * A false quand un autre fournisseur peut prendre le relais : basculer
+         * est instantane, attendre coute une minute. On ne patiente qu'en bout
+         * de chaine, ou l'alternative est le petit modele du telephone.
+         */
+        attendreSurQuota: Boolean = true,
     ): String {
         val modeleRetenu = modele.ifBlank { fournisseur.modeleParDefaut }
         var extras = true
@@ -94,7 +102,7 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
                 // telephone, qui ecrit moins bien et met dix minutes. On ne
                 // renonce que si l'attente depasse le raisonnable, ou si elle
                 // se repete trop -- la, c'est le quota du jour, pas la minute.
-                if (e.code == 429 && attentes < MAX_ATTENTES) {
+                if (e.code == 429 && attendreSurQuota && attentes < MAX_ATTENTES) {
                     val secondes = (e.attenteS ?: ATTENTE_PAR_DEFAUT).coerceAtMost(ATTENTE_MAX)
                     if (e.attenteS == null || e.attenteS <= ATTENTE_MAX) {
                         attentes++
@@ -173,8 +181,12 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
         try {
             appel.execute().use { reponse ->
                 if (!reponse.isSuccessful) {
+                    // Le corps ne se lit qu'une fois : il porte le message et,
+                    // chez Google, l'attente a respecter.
+                    val corpsErreur = reponse.body?.string().orEmpty()
                     val attente = attenteDemandee(reponse)
-                    val detail = RequetesCloud.detailErreur(reponse.body?.string().orEmpty())
+                        ?: RequetesCloud.attenteDepuisCorps(corpsErreur)
+                    val detail = RequetesCloud.detailErreur(corpsErreur)
                     Log.w(TAG, "${fournisseur.hote} a repondu ${reponse.code}")
                     throw ReponseInvalide(reponse.code, masquer(detail, cle), attente)
                 }

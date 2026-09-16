@@ -323,6 +323,27 @@ object RequetesCloud {
             (detail.takeIf { it.isNotBlank() }?.let { " : $it" } ?: ".")
     }
 
+    /**
+     * Attente demandee dans le corps d'une erreur, pour les fournisseurs qui ne
+     * la mettent pas en en-tete.
+     *
+     * Google la place dans error.details, sous un objet RetryInfo, au format
+     * "27s". Sans cela on attendrait une duree arbitraire la ou le fournisseur
+     * donne la reponse exacte.
+     */
+    fun attenteDepuisCorps(corps: String): Int? {
+        val racine = runCatching { json.parseToJsonElement(corps).jsonObject }.getOrNull()
+            ?: return null
+        val details = runCatching {
+            racine["error"]?.jsonObject?.get("details")?.jsonArray
+        }.getOrNull() ?: return null
+        val delai = details.firstNotNullOfOrNull { d ->
+            runCatching { d.jsonObject["retryDelay"]?.jsonPrimitive?.content }.getOrNull()
+        } ?: return null
+        val secondes = delai.trim().removeSuffix("s").toDoubleOrNull() ?: return null
+        return kotlin.math.ceil(secondes).toInt().coerceAtLeast(1)
+    }
+
     /** Message applicatif d'une reponse d'erreur, sans le bruit du JSON. */
     fun detailErreur(corps: String): String {
         val racine = runCatching { json.parseToJsonElement(corps).jsonObject }.getOrNull()

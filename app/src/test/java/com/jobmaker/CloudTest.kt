@@ -247,6 +247,35 @@ class CloudTest {
     }
 
     @Test
+    fun `l'attente demandee par google est lue dans le corps de l'erreur`() {
+        // Google ne met pas d'en-tete Retry-After : l'attente exacte est dans
+        // error.details, sous un RetryInfo. Sans la lire, on patienterait une
+        // duree arbitraire la ou l'API donne la reponse.
+        val corps = """
+            {"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"quota",
+              "details":[
+                {"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[]},
+                {"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"27s"}]}}
+        """.trimIndent()
+        assertEquals(27, RequetesCloud.attenteDepuisCorps(corps))
+    }
+
+    @Test
+    fun `une attente fractionnaire est arrondie vers le haut`() {
+        val corps = """
+            {"error":{"details":[
+              {"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"7.4s"}]}}
+        """.trimIndent()
+        assertEquals(8, RequetesCloud.attenteDepuisCorps(corps))
+    }
+
+    @Test
+    fun `une erreur sans attente indiquee ne fait pas deviner`() {
+        assertNull(RequetesCloud.attenteDepuisCorps("""{"error":{"message":"nope"}}"""))
+        assertNull(RequetesCloud.attenteDepuisCorps("<html>502</html>"))
+    }
+
+    @Test
     fun `le detail d'erreur est extrait du json du fournisseur`() {
         val corps = """{"error":{"message":"model decommissioned","code":"model_not_found"}}"""
         assertEquals("model decommissioned", RequetesCloud.detailErreur(corps))
