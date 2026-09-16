@@ -65,12 +65,22 @@ class MoteurCloud(
             modele = modeleRetenu,
             cle = cle,
             messages = messages,
-            params = params,
+            params = params.copy(maxTokens = budget(params.maxTokens)),
             onToken = onToken,
         )
     }
 
     override suspend fun liberer() = Unit
+
+    /**
+     * Les budgets de tokens du pipeline ont ete tailles pour un modele local,
+     * ou chaque token coute des secondes de calcul et de la memoire. A
+     * distance, aucune des deux contraintes ne s'applique, et un modele a
+     * raisonnement depense une partie du budget a reflechir avant d'ecrire une
+     * seule ligne. On double donc, sans plafond genant : on ne paie que les
+     * tokens reellement produits.
+     */
+    private fun budget(demande: Int): Int = (demande * 2).coerceIn(1024, 8192)
 
     private companion object { const val CONTEXTE_SUPPOSE = 32_768 }
 }

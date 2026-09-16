@@ -31,17 +31,42 @@ object RequetesCloud {
     // Corps des requetes
     // -----------------------------------------------------------------------
 
-    /** Dialecte OpenAI : Groq, OpenRouter, et la plupart des passerelles. */
-    fun corpsOpenAi(modele: String, messages: List<ChatMessage>, params: GenerationParams): String {
+    /**
+     * Modeles qui reflechissent avant de repondre.
+     *
+     * Leur raisonnement est facture sur le meme budget que la reponse : sans
+     * bride, un gpt-oss peut depenser mille tokens a reflechir puis n'avoir
+     * plus de quoi ecrire, et l'appel renvoie une reponse vide. "low" garde le
+     * benefice du raisonnement sur une offre mal redigee sans y engloutir le
+     * budget -- et accelere la generation au passage.
+     */
+    private fun raisonne(modele: String): Boolean =
+        modele.contains("gpt-oss", ignoreCase = true)
+
+    /**
+     * Dialecte OpenAI : Groq, OpenRouter, et la plupart des passerelles.
+     *
+     * [extras] a false produit le corps minimal, sans mode JSON ni bride de
+     * raisonnement : c'est la deuxieme tentative, apres qu'un modele a refuse
+     * l'un de ces reglages par un 400.
+     */
+    fun corpsOpenAi(
+        modele: String,
+        messages: List<ChatMessage>,
+        params: GenerationParams,
+        extras: Boolean = true,
+    ): String {
         // Les API OpenAI-compatibles exigent le mot "json" quelque part dans la
         // conversation quand on demande le mode JSON, et repondent 400 sinon.
         val mentionneJson = messages.any { it.content.contains("json", ignoreCase = true) }
+        val modeJson = params.sortieJson && extras
         val obj = buildJsonObject {
             put("model", modele)
             put("stream", true)
             put("temperature", params.temperature)
             put("top_p", params.topP)
             put("max_tokens", params.maxTokens)
+            if (extras && raisonne(modele)) put("reasoning_effort", "low")
             putJsonArray("messages") {
                 messages.forEach { m ->
                     addJsonObject {
@@ -49,14 +74,14 @@ object RequetesCloud {
                         put("content", m.content)
                     }
                 }
-                if (params.sortieJson && !mentionneJson) {
+                if (modeJson && !mentionneJson) {
                     addJsonObject {
                         put("role", "system")
                         put("content", "Repond uniquement par un objet json valide.")
                     }
                 }
             }
-            if (params.sortieJson) {
+            if (modeJson) {
                 putJsonObject("response_format") { put("type", "json_object") }
             }
         }
@@ -64,7 +89,11 @@ object RequetesCloud {
     }
 
     /** Dialecte Google : le systeme se declare a part, les roles different. */
-    fun corpsGemini(messages: List<ChatMessage>, params: GenerationParams): String {
+    fun corpsGemini(
+        messages: List<ChatMessage>,
+        params: GenerationParams,
+        extras: Boolean = true,
+    ): String {
         val systeme = messages.filter { it.role == "system" }
             .joinToString("\n\n") { it.content }
         val echanges = messages.filter { it.role != "system" }
@@ -87,7 +116,7 @@ object RequetesCloud {
                 put("topP", params.topP)
                 put("topK", params.topK)
                 put("maxOutputTokens", params.maxTokens)
-                if (params.sortieJson) put("responseMimeType", "application/json")
+                if (params.sortieJson && extras) put("responseMimeType", "application/json")
             }
             // Les filtres de securite de Google bloquent parfois une annonce
             // parfaitement anodine (secteur medical, securite privee, armee).
@@ -114,9 +143,10 @@ object RequetesCloud {
         modele: String,
         messages: List<ChatMessage>,
         params: GenerationParams,
+        extras: Boolean = true,
     ): String = when (fournisseur.dialecte) {
-        DialecteCloud.OPENAI -> corpsOpenAi(modele, messages, params)
-        DialecteCloud.GEMINI -> corpsGemini(messages, params)
+        DialecteCloud.OPENAI -> corpsOpenAi(modele, messages, params, extras)
+        DialecteCloud.GEMINI -> corpsGemini(messages, params, extras)
     }
 
     // -----------------------------------------------------------------------
@@ -127,6 +157,21 @@ object RequetesCloud {
     const val FIN_FLUX = "[DONE]"
 
     /**
+     * Un evenement du flux.
+     *
+     * Les modeles a raisonnement separent ce qu'ils se disent a eux-memes de ce
+     * qu'ils repondent. Le premier ne doit jamais atterrir dans un CV, mais il
+     * a son utilite : affiche a l'ecran, il montre que la generation avance au
+     * lieu de laisser croire que tout est fige.
+     */
+    data class MorceauFlux(
+        /** Ce qui compte : la reponse. */
+        val texte: String? = null,
+        /** Ce que le modele se dit avant de repondre. Affiche, jamais conserve. */
+        val raisonnement: String? = null,
+    )
+
+    /**
      * Extrait le texte d'une ligne "data:" du flux.
      *
      * Retourne null quand la ligne ne porte pas de texte (keep-alive, metadonnees
@@ -134,7 +179,7 @@ object RequetesCloud {
      * une erreur applicative, ce que font les deux dialectes au lieu de couper la
      * connexion.
      */
-    fun morceau(dialecte: DialecteCloud, data: String): String? {
+    fun morceau(dialecte: DialecteCloud, data: String): MorceauFlux? {
         val brut = data.trim()
         if (brut.isEmpty() || brut == FIN_FLUX) return null
         val racine = runCatching { json.parseToJsonElement(brut).jsonObject }.getOrNull()
@@ -149,27 +194,44 @@ object RequetesCloud {
         // Au-dela de l'erreur applicative, aucune malformation ne doit
         // interrompre une generation en cours : une ligne qu'on ne sait pas
         // lire est une ligne qu'on ignore.
-        return runCatching { texte(dialecte, racine) }.getOrNull()
+        val m = runCatching { extraire(dialecte, racine) }.getOrNull() ?: return null
+        return if (m.texte == null && m.raisonnement == null) null else m
     }
 
-    private fun texte(dialecte: DialecteCloud, racine: JsonObject): String? = when (dialecte) {
+    private fun extraire(dialecte: DialecteCloud, racine: JsonObject): MorceauFlux? = when (dialecte) {
         DialecteCloud.OPENAI -> racine["choices"]
             ?.let { it.jsonArray.firstOrNull()?.jsonObject }
             ?.let { choix ->
-                choix["delta"]?.jsonObject?.get("content")?.jsonPrimitive?.contenuOuNull()
-                    // Certaines passerelles renvoient la reponse complete au
-                    // lieu d'un delta sur le dernier evenement.
-                    ?: choix["message"]?.jsonObject?.get("content")
-                        ?.jsonPrimitive?.contenuOuNull()
+                val delta = choix["delta"]?.jsonObject
+                MorceauFlux(
+                    texte = delta?.get("content")?.jsonPrimitive?.contenuOuNull()
+                        // Certaines passerelles renvoient la reponse complete au
+                        // lieu d'un delta sur le dernier evenement.
+                        ?: choix["message"]?.jsonObject?.get("content")
+                            ?.jsonPrimitive?.contenuOuNull(),
+                    // Groq place le raisonnement des gpt-oss dans son propre
+                    // champ ; d'autres passerelles le nomment "reasoning_content".
+                    raisonnement = delta?.get("reasoning")?.jsonPrimitive?.contenuOuNull()
+                        ?: delta?.get("reasoning_content")?.jsonPrimitive?.contenuOuNull(),
+                )
             }
 
         DialecteCloud.GEMINI -> racine["candidates"]
             ?.let { it.jsonArray.firstOrNull()?.jsonObject }
             ?.let { candidat ->
-                candidat["content"]?.jsonObject?.get("parts")?.jsonArray
-                    ?.mapNotNull { p -> p.jsonObject["text"]?.jsonPrimitive?.contenuOuNull() }
-                    ?.joinToString("")
-                    ?.takeIf { it.isNotEmpty() }
+                val parties = candidat["content"]?.jsonObject?.get("parts")?.jsonArray
+                    ?: return@let null
+                // Google marque ses parties de reflexion d'un drapeau "thought".
+                val (pensees, reponse) = parties.partition { p ->
+                    runCatching {
+                        p.jsonObject["thought"]?.jsonPrimitive?.content == "true"
+                    }.getOrDefault(false)
+                }
+                fun texteDe(l: List<JsonElement>) = l
+                    .mapNotNull { p -> p.jsonObject["text"]?.jsonPrimitive?.contenuOuNull() }
+                    .joinToString("")
+                    .takeIf { it.isNotEmpty() }
+                MorceauFlux(texte = texteDe(reponse), raisonnement = texteDe(pensees))
             }
     }
 
@@ -198,8 +260,10 @@ object RequetesCloud {
                 // Les modeles audio, image et garde-fous ne redigent pas de CV.
                 .filterNot { id ->
                     val bas = id.lowercase()
-                    listOf("whisper", "tts", "guard", "embed", "moderation", "vision-ocr")
-                        .any { bas.contains(it) }
+                    listOf(
+                        "whisper", "tts", "guard", "embed", "moderation", "vision-ocr",
+                        "orpheus", "playai", "parakeet",
+                    ).any { bas.contains(it) }
                 }
 
             DialecteCloud.GEMINI -> (racine["models"]?.jsonArray ?: emptyList<JsonElement>())

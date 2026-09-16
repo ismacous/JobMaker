@@ -88,7 +88,59 @@ class CloudTest {
     @Test
     fun `un delta openai rend son texte`() {
         val ligne = """{"choices":[{"delta":{"content":"Magasin"},"index":0}]}"""
-        assertEquals("Magasin", RequetesCloud.morceau(DialecteCloud.OPENAI, ligne))
+        assertEquals("Magasin", RequetesCloud.morceau(DialecteCloud.OPENAI, ligne)?.texte)
+    }
+
+    @Test
+    fun `le raisonnement est separe de la reponse, jamais melange`() {
+        // gpt-oss chez Groq : ce que le modele se dit arrive dans son propre
+        // champ. Le laisser passer pour du texte mettrait son brouillon dans
+        // le CV ; l'ignorer donnerait un ecran fige pendant qu'il reflechit.
+        val pense = """{"choices":[{"delta":{"reasoning":"L'offre demande un CAP."}}]}"""
+        val m = RequetesCloud.morceau(DialecteCloud.OPENAI, pense)
+        assertNull(m?.texte)
+        assertEquals("L'offre demande un CAP.", m?.raisonnement)
+    }
+
+    @Test
+    fun `gemini distingue ses parties de reflexion`() {
+        val ligne = """
+            {"candidates":[{"content":{"parts":[
+              {"text":"Je dois lister les missions.","thought":true},
+              {"text":"Magasinier cariste"}]}}]}
+        """.trimIndent()
+        val m = RequetesCloud.morceau(DialecteCloud.GEMINI, ligne)
+        assertEquals("Magasinier cariste", m?.texte)
+        assertEquals("Je dois lister les missions.", m?.raisonnement)
+    }
+
+    @Test
+    fun `les modeles a raisonnement sont brides, les autres intacts`() {
+        // Sans bride, gpt-oss depense son budget a reflechir et rend une
+        // reponse vide : c'est exactement ce qui cassait le bouton "Tester".
+        val avec = RequetesCloud.corpsOpenAi(
+            "openai/gpt-oss-120b", messages, GenerationParams.precise(),
+        )
+        assertTrue(avec.contains("\"reasoning_effort\":\"low\""))
+
+        val sans = RequetesCloud.corpsOpenAi(
+            "qwen/qwen3.8-27b", messages, GenerationParams.precise(),
+        )
+        assertFalse(sans.contains("reasoning_effort"))
+    }
+
+    @Test
+    fun `le corps minimal abandonne tout ce qu'un modele peut refuser`() {
+        // Deuxieme tentative apres un 400 : ni mode JSON, ni bride.
+        val corps = RequetesCloud.corpsOpenAi(
+            "openai/gpt-oss-120b",
+            messages,
+            GenerationParams.precise().copy(sortieJson = true),
+            extras = false,
+        )
+        assertFalse(corps.contains("reasoning_effort"))
+        assertFalse(corps.contains("response_format"))
+        assertTrue(corps.contains("Voici l'offre."))
     }
 
     @Test
@@ -117,7 +169,7 @@ class CloudTest {
             {"candidates":[{"content":{"role":"model","parts":[
               {"text":"Bonjour "},{"text":"Madame"}]}}]}
         """.trimIndent()
-        assertEquals("Bonjour Madame", RequetesCloud.morceau(DialecteCloud.GEMINI, ligne))
+        assertEquals("Bonjour Madame", RequetesCloud.morceau(DialecteCloud.GEMINI, ligne)?.texte)
     }
 
     @Test(expected = ErreurCloud::class)
@@ -143,7 +195,8 @@ class CloudTest {
     fun `la liste openai ecarte ce qui ne redige pas`() {
         val corps = """
             {"data":[{"id":"openai/gpt-oss-120b"},{"id":"whisper-large-v3"},
-                     {"id":"meta-llama/llama-guard-4-12b"},{"id":"qwen/qwen3-32b"}]}
+                     {"id":"meta-llama/llama-guard-4-12b"},{"id":"qwen/qwen3-32b"},
+                     {"id":"canopylabs/orpheus-v1-english"}]}
         """.trimIndent()
         assertEquals(
             listOf("openai/gpt-oss-120b", "qwen/qwen3-32b"),

@@ -170,7 +170,10 @@ class MoteurIaViewModel(private val container: AppContainer) : ViewModel() {
                     ChatMessage.system("Tu reponds en un mot."),
                     ChatMessage.user("Reponds exactement : pret"),
                 ),
-                params = GenerationParams.precise(maxTokens = 16),
+                // Large pour un "pret" : les modeles a raisonnement facturent
+                // leur reflexion sur ce budget, et un test trop serre les
+                // faisait echouer alors que la cle etait parfaitement valide.
+                params = GenerationParams.precise(maxTokens = 512),
             )
         }
             .onSuccess {

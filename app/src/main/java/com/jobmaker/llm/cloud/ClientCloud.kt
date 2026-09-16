@@ -58,7 +58,7 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
         onToken: ((String) -> Unit)? = null,
     ): String {
         val modeleRetenu = modele.ifBlank { fournisseur.modeleParDefaut }
-        var parametres = params
+        var extras = true
         var tentative = 0
 
         // Boucle sans sortie normale : on quitte par un return ou une
@@ -67,16 +67,17 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
             tentative++
             try {
                 return withContext(Dispatchers.IO) {
-                    flux(fournisseur, modeleRetenu, cle, messages, parametres, onToken)
+                    flux(fournisseur, modeleRetenu, cle, messages, params, extras, onToken)
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: ReponseInvalide) {
-                // Un modele qui ne connait pas le mode JSON natif : on retente
-                // sans, le pipeline sait deja rattraper un JSON approximatif.
-                if (e.code == 400 && parametres.sortieJson) {
-                    Log.i(TAG, "Mode JSON refuse par $modeleRetenu, nouvelle tentative sans")
-                    parametres = parametres.copy(sortieJson = false)
+                // Un modele qui ne connait ni le mode JSON natif ni la bride de
+                // raisonnement : on retente avec le corps minimal. Le pipeline
+                // sait deja rattraper un JSON approximatif.
+                if (e.code == 400 && extras) {
+                    Log.i(TAG, "Reglage refuse par $modeleRetenu, nouvelle tentative sans")
+                    extras = false
                     continue
                 }
                 if (e.code in 500..599 && tentative <= MAX_TENTATIVES) {
@@ -135,9 +136,10 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
         cle: String,
         messages: List<ChatMessage>,
         params: GenerationParams,
+        extras: Boolean,
         onToken: ((String) -> Unit)?,
     ): String {
-        val corps = RequetesCloud.corps(fournisseur, modele, messages, params)
+        val corps = RequetesCloud.corps(fournisseur, modele, messages, params, extras)
         val requete = Request.Builder()
             .url(verifierUrl(fournisseur, fournisseur.urlGeneration(modele)))
             .headers(entetes(fournisseur, cle, flux = true))
@@ -159,6 +161,7 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
                     ?: throw ReponseInvalide(502, "reponse vide")
 
                 val sortie = StringBuilder()
+                var reflexion = 0
                 while (true) {
                     if (!currentCoroutineContext().isActive) {
                         appel.cancel()
@@ -177,17 +180,36 @@ class ClientCloud(private val http: OkHttpClient = clientParDefaut()) {
                             repliPossible = true,
                         )
                     } ?: continue
-                    sortie.append(morceau)
-                    onToken?.invoke(morceau)
+
+                    // Le raisonnement est montre a l'ecran pour temoigner de
+                    // l'activite, mais n'entre jamais dans le resultat : c'est
+                    // un brouillon, pas une reponse.
+                    morceau.raisonnement?.let {
+                        reflexion += it.length
+                        onToken?.invoke(it)
+                    }
+                    morceau.texte?.let {
+                        sortie.append(it)
+                        onToken?.invoke(it)
+                    }
                 }
 
                 val duree = System.currentTimeMillis() - debut
                 Log.i(TAG, "${fournisseur.hote} : ${sortie.length} caracteres en $duree ms")
 
                 if (sortie.isBlank()) {
+                    // Un modele a raisonnement qui a tout depense a reflechir :
+                    // le diagnostic est different, et la solution aussi.
                     throw PanneCloud(
-                        "${fournisseur.nom} n'a rien renvoye. Le modele \"$modele\" a " +
-                            "peut-etre bloque la demande ; essayez-en un autre.",
+                        if (reflexion > 0) {
+                            "Le modele \"$modele\" a epuise son budget de tokens en " +
+                                "reflexion sans rien ecrire. Choisissez un modele sans " +
+                                "raisonnement, ou reessayez : la demande etait trop courte " +
+                                "pour lui."
+                        } else {
+                            "${fournisseur.nom} n'a rien renvoye. Le modele \"$modele\" a " +
+                                "peut-etre bloque la demande ; essayez-en un autre."
+                        },
                         repliPossible = true,
                     )
                 }
