@@ -316,8 +316,10 @@ class Orchestrator(
                 ).takeIf { rapport.accrocheParleDeRecherche },
             "lettre qui resume l'annonce au lieu de s'y adresser"
                 .takeIf { rapport.lettreResumeLAnnonce },
-            "lettre qui annonce un plan pour les premiers mois"
-                .takeIf { rapport.lettreProjetteLesPremiersMois },
+            (
+                "lettre qui annonce au futur ce que vous ferez, au lieu de s'appuyer " +
+                    "sur ce que vous avez deja fait"
+                ).takeIf { rapport.lettreProjetteLesPremiersMois },
         )
         val avertissement = constats.takeIf { it.isNotEmpty() }?.let {
             "Verification automatique : " + it.joinToString(" ; ") +
@@ -515,9 +517,11 @@ class Orchestrator(
             }
             if (rapport.lettreProjetteLesPremiersMois) {
                 add(Probleme("bloquant", "lettre",
-                    "La lettre annonce ce qui sera fait dans les premiers mois",
-                    "Supprimer ce paragraphe. Personne n'ecrit de plan d'integration dans " +
-                        "une lettre, et cela presume du poste avant de l'avoir obtenu"))
+                    "La lettre parle au futur du travail : elle annonce ce qui sera fait",
+                    "Remplacer ce passage par une seconde preuve prise dans le profil : " +
+                        "une autre experience, un savoir-faire deja exerce qui repond a une " +
+                        "tache de l'annonce, un benevolat. Un plan annonce devient une " +
+                        "promesse que le recruteur attendra des le premier jour"))
             }
             if (rapport.puceTropLongues > 0) {
                 add(Probleme("mineur", "experience",

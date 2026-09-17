@@ -210,15 +210,31 @@ la premiere ligne.
      "Le poste de X requiert une capacite a..." ou "Le dispositif Y necessite..."
      est une lettre qui apprend son travail a celui qui la lit.
 
-  b) NE JAMAIS annoncer ce que le candidat fera "dans les premiers mois", ni
-     aucun plan d'action, aucune projection sur l'organisation du travail, aucun
-     "je pourrai mettre a profit". Personne n'ecrit cela dans une vraie lettre.
-     Cela presume du poste avant de l'avoir obtenu, et cela sonne faux.
+  b) LA LETTRE NE PARLE JAMAIS AU FUTUR DU TRAVAIL. C'est la regle la plus
+     importante des trois, et la plus large : elle couvre toute une famille de
+     tournures, pas seulement quelques formules.
+     Sont donc interdits : "dans les premiers mois", "des mon arrivee", "je
+     compte", "je pourrai", "j'assurerai", "je mettrai en place", "je veillerai
+     a", "cette approche me permettra", et toute liste numerotee ou en etapes de
+     ce qui sera fait.
+     Deux raisons, et la seconde est la plus concrete :
+     - personne n'ecrit cela dans une vraie lettre, et cela presume du poste
+       avant de l'avoir obtenu ;
+     - surtout, un plan annonce devient une promesse. Le recruteur le lit comme
+       un engagement, attend ce qui y figure des le premier jour, et le candidat
+       se retrouve a devoir tenir un programme qu'il a ecrit sans connaitre la
+       maison. On ne se cree pas cette dette-la dans une lettre.
+     Le seul futur autorise est celui de la conclusion, et il ne porte que sur la
+     disponibilite et la rencontre.
+     Une lettre parle de ce qui EXISTE DEJA : ce que le candidat a fait, sait
+     faire, et a deja demontre. Le reste se discute en entretien.
 
   c) NE JAMAIS employer ces tournures : "Je me permets de", "C'est avec un grand
-     interet", "Vivement interesse", "Fort de mon experience", "Veritable
+     interet", "Vivement interesse", "Fort de" et "Forte de" sous toutes leurs
+     formes ("Fort de mon experience", "Fort d'une experience"), "Veritable
      passionne", "A l'ere de", "votre prestigieuse", "dynamique et motive",
-     "N'hesitez pas a me contacter", "je suis convaincu que mon profil".
+     "N'hesitez pas a me contacter", "je suis convaincu que mon profil",
+     "je souhaite mettre mes competences au service de".
 
 LES PARAGRAPHES :
 1. POURQUOI EUX. Une raison precise et verifiable dans l'annonce : une mission,
@@ -231,10 +247,19 @@ LES PARAGRAPHES :
    une coordination, elle ne devient pas une "mediation" parce que l'annonce
    emploie ce mot. Requalifier une tache pour qu'elle colle est un mensonge poli,
    et il s'effondre a la premiere question d'entretien.
-3. CE QUI LE REND CREDIBLE AUTREMENT. Benevolat, engagement, projet personnel,
-   experience de vie qui eclaire ce poste. SAUTE CE PARAGRAPHE si le profil n'a
-   rien de tel : trois paragraphes justes valent mieux que quatre dont un rempli
-   de vide.
+3. UNE SECONDE PREUVE, D'UN AUTRE ORDRE. C'est la place qu'occupait le plan
+   d'action : elle sert maintenant a appuyer une deuxieme fois la competence, sur
+   un autre appui que le paragraphe 2.
+   Au choix, selon ce que le profil contient de plus fort pour CETTE annonce :
+   - une autre experience du parcours, qui touche un aspect different du poste ;
+   - un savoir-faire deja exerce qui correspond litteralement a une tache de
+     l'annonce, meme acquis ailleurs (un graphiste qui a produit des supports
+     PLV repond directement a une annonce de merchandising) ;
+   - un benevolat, un engagement, un projet personnel qui eclaire ce poste.
+   Regarde le profil et choisis le plus fort. Ne repete pas le paragraphe 2, et
+   ne parle pas davantage au futur ici qu'ailleurs.
+   SAUTE CE PARAGRAPHE si le profil n'offre rien de solide : trois paragraphes
+   justes valent mieux que quatre dont un rempli de vide ou de projections.
 4. CONCLUSION. Deux phrases maximum : disponibilite, et proposition de se
    rencontrer. Rien d'autre.
 
@@ -326,8 +351,14 @@ cet ordre de gravite :
      poste) au lieu de ce qu'il apporte ;
    - un paragraphe de lettre qui resume l'annonce ou explique le poste au recruteur,
      en general le premier ;
-   - un paragraphe qui annonce ce que le candidat fera "dans les premiers mois", ou
-     tout autre plan d'action.
+   - tout passage de la lettre qui parle au futur du travail : "dans les premiers
+     mois", "je compte", "je pourrai", "j'assurerai", "cette approche me
+     permettra", ou une liste numerotee de ce qui sera fait. Seule la conclusion
+     a le droit au futur, et seulement pour la disponibilite et la rencontre.
+     Remplace le passage par une seconde preuve prise dans le profil : une autre
+     experience, un savoir-faire deja exerce qui correspond a une tache de
+     l'annonce, un benevolat. Si le profil n'a rien de solide a mettre la,
+     supprime le paragraphe au lieu de le remplir.
    Reecris-les. Ne te contente pas de les signaler.
 3. MOTS-CLES MANQUANTS - termes importants de l'annonce que le profil justifie mais que
    le CV n'emploie pas.

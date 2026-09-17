@@ -153,8 +153,13 @@ object FactCheck {
             !Regex("\\b(je|j |mon|ma|mes|moi|nous)\\b").containsMatchIn(premierParagraphe) &&
             MOTIFS_DESCRIPTION.any { it.containsMatchIn(premierParagraphe) }
 
-        val lettreNormalisee = normaliser(lettre.paragraphes.joinToString(" "))
-        val projection = MOTIFS_PROJECTION.any { it.containsMatchIn(lettreNormalisee) }
+        // La conclusion a le droit au futur -- "je reste disponible", "je pourrai
+        // vous rencontrer" -- donc on ne l'inspecte pas. Ce sont les paragraphes
+        // du corps qui ne doivent rien promettre.
+        val corps = lettre.paragraphes.dropLast(1)
+        val corpsNormalise = normaliser(corps.joinToString(" "))
+        val projection = MOTIFS_PROJECTION.any { it.containsMatchIn(corpsNormalise) } ||
+            MOTIF_PLAN_NUMEROTE.containsMatchIn(corps.joinToString(" "))
 
         return Rapport(
             organisationsSuspectes = orgsSuspectes,
@@ -224,13 +229,35 @@ object FactCheck {
         Regex("\\b(consiste a|repose sur|s articule autour)\\b"),
     )
 
-    /** Le plan d'integration que personne n'ecrit dans une vraie lettre. */
+    /**
+     * La lettre qui parle au futur du travail.
+     *
+     * Ce n'est pas qu'une question de style : un plan annonce se lit comme un
+     * engagement. Le recruteur attend ce qui y figure des le premier jour, et le
+     * candidat doit tenir un programme ecrit sans connaitre la maison.
+     *
+     * La famille entiere est donc visee, pas seulement "les premiers mois" : le
+     * modele qui contourne une formule interdite en trouve une autre.
+     */
     private val MOTIFS_PROJECTION = listOf(
         Regex("\\b(premiers mois|premieres semaines|premiers jours)\\b"),
-        Regex("\\bdes (mon|ma) (arrivee|prise de (poste|fonction)|integration)\\b"),
-        Regex("\\bje pourrai (mettre a profit|apporter|contribuer|assurer)"),
-        Regex("\\bdans un premier temps, je\\b"),
+        Regex("\\bdes (mon|ma|la) (arrivee|prise de (poste|fonction)|integration)\\b"),
+        Regex("\\bdans un premier temps,? je\\b"),
+        // Le futur et le conditionnel a la premiere personne, sur le travail.
+        Regex("\\bje (compte|pourrai|saurai|veillerai|assurerai|mettrai|apporterai|" +
+            "deploierai|proposerai|commencerai|organiserai|contribuerai|prendrai)\\b"),
+        Regex("\\bj (assurerai|apporterai|organiserai|aurai)\\b"),
+        Regex("\\b(cela|ceci|cette approche|mon approche|ma methode|cette methode) " +
+            "(me |m )?permettra\\b"),
+        Regex("\\bje serai (en mesure|amene)\\b"),
     )
+
+    /**
+     * Le plan en etapes, reconnaissable a sa numerotation. Se cherche sur le
+     * texte brut : la normalisation efface la ponctuation qui le trahit.
+     */
+    private val MOTIF_PLAN_NUMEROTE = Regex("""\b1\s*[).]\s*\p{L}.{0,400}?\b2\s*[).]\s*\p{L}""",
+        setOf(RegexOption.DOT_MATCHES_ALL))
 
     /** Minuscules, sans accents, sans ponctuation, espaces normalises. */
     fun normaliser(texte: String): String =

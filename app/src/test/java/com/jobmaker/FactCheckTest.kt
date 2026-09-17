@@ -196,6 +196,60 @@ class FactCheckTest {
     }
 
     @Test
+    fun `tout le futur sur le travail est signale, pas seulement les premiers mois`() {
+        // Le modele qui contourne une formule interdite en trouve une autre :
+        // c'est la famille entiere qu'il faut viser.
+        val tournures = listOf(
+            "Je compte structurer le reporting quotidien.",
+            "Je pourrai apporter ma rigueur sur le terrain.",
+            "J'assurerai le deploiement des supports en magasin.",
+            "Des mon arrivee, je prendrai en charge les points de vente.",
+            "Cette approche me permettra de garantir la visibilite des produits.",
+            "Je serai en mesure de tenir les delais de mise en rayon.",
+        )
+        tournures.forEach { phrase ->
+            val lettre = LetterContent(
+                paragraphes = listOf("Votre reseau de magasins m'interesse.", phrase,
+                    "Je reste disponible pour en echanger."),
+            )
+            assertTrue(
+                "non detecte : \"$phrase\"",
+                FactCheck.verifier(profil, offre, cvFidele, lettre)
+                    .lettreProjetteLesPremiersMois,
+            )
+        }
+    }
+
+    @Test
+    fun `un plan numerote est signale meme sans formule interdite`() {
+        val lettre = LetterContent(
+            paragraphes = listOf(
+                "Votre reseau de magasins m'interesse.",
+                "Mon approche du terrain : 1) auditer les points de vente, " +
+                    "2) deployer les supports, 3) transmettre le reporting.",
+                "Je reste disponible pour en echanger.",
+            )
+        )
+        assertTrue(FactCheck.verifier(profil, offre, cvFidele, lettre)
+            .lettreProjetteLesPremiersMois)
+    }
+
+    @Test
+    fun `la conclusion garde le droit au futur`() {
+        // "je pourrai vous rencontrer" en derniere phrase est normal : c'est le
+        // corps de la lettre qui ne doit rien promettre.
+        val lettre = LetterContent(
+            paragraphes = listOf(
+                "Votre reseau de magasins m'interesse.",
+                "Chez CapTrain, j'ai coordonne la preparation des equipements.",
+                "Disponible immediatement, je pourrai vous rencontrer quand vous voudrez.",
+            )
+        )
+        assertFalse(FactCheck.verifier(profil, offre, cvFidele, lettre)
+            .lettreProjetteLesPremiersMois)
+    }
+
+    @Test
     fun `une lettre sans plan d'integration passe`() {
         val lettre = LetterContent(
             paragraphes = listOf(
