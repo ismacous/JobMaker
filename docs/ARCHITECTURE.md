@@ -212,6 +212,34 @@ aucun de ces champs. Ce n'est pas de la prudence : c'est la seule façon
 d'obtenir une garantie plutôt qu'une promesse. Un modèle qui n'a pas de champ où
 écrire un numéro de téléphone ne peut pas en inventer un.
 
+### Les trois marques de machine
+
+Une candidature réelle produite par l'application ouvrait sa lettre en résumant
+l'annonce au recruteur, annonçait ensuite ce que le candidat ferait « dans les
+premiers mois », et présentait dans l'accroche du CV ce qu'il **cherchait** plutôt
+que ce qu'il apportait — en s'attribuant au passage un secteur où il n'avait
+jamais travaillé.
+
+Aucun de ces défauts ne venait du modèle : les trois étaient **demandés par les
+consignes**. `redactionSystem` réclamait mot pour mot une accroche contenant « ce
+que le candidat cherche », un premier paragraphe décrivant « le besoin de
+l'entreprise tel qu'il ressort de l'annonce », et un troisième sur « ce que le
+candidat apportera dans les premiers mois ». Le modèle obéissait.
+
+Les consignes énoncent maintenant ces trois points comme des interdictions, avec
+le contre-exemple à ne pas écrire — un modèle suit bien mieux un exemple négatif
+concret qu'un adjectif de style. Et comme une consigne ne garantit rien,
+`FactCheck` les vérifie mécaniquement :
+
+| Défaut | Détection |
+|---|---|
+| Accroche tournée vers la demande | tournures « recherche un/une », « à la recherche de », « souhaite intégrer » |
+| Premier paragraphe qui décrit le poste | aucune première personne **et** un verbe d'exigence (`requiert`, `nécessite`, `consiste à`…) |
+| Plan pour les premiers mois | « premiers mois », « dès ma prise de poste », « je pourrai mettre à profit » |
+
+Les trois comptent comme des alertes au même titre qu'une invention : elles ne
+sont pas des mensonges, mais elles font écarter la candidature aussi sûrement.
+
 ### Vérifications sans IA
 
 `FactCheck` compare le CV produit au profil par simple comparaison de chaînes :

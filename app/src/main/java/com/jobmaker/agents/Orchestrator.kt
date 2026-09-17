@@ -303,16 +303,26 @@ class Orchestrator(
         val rapport = FactCheck.verifier(profile, analyse, cv, lettre)
         val revue = fusionner(revision?.revue ?: Review(), rapport)
 
-        val avertissement = if (rapport.aDesAlertes) {
-            "Verification automatique : " + listOfNotNull(
-                rapport.organisationsSuspectes.takeIf { it.isNotEmpty() }
-                    ?.let { "organisations absentes du profil (${it.joinToString(", ")})" },
-                rapport.diplomesSuspects.takeIf { it.isNotEmpty() }
-                    ?.let { "diplomes absents du profil (${it.joinToString(", ")})" },
-                rapport.chiffresSuspects.takeIf { it.isNotEmpty() }
-                    ?.let { "chiffres non presents dans le profil (${it.joinToString(", ")})" },
-            ).joinToString(" ; ") + ". Verifiez-les avant d'envoyer."
-        } else null
+        val constats = listOfNotNull(
+            rapport.organisationsSuspectes.takeIf { it.isNotEmpty() }
+                ?.let { "organisations absentes du profil (${it.joinToString(", ")})" },
+            rapport.diplomesSuspects.takeIf { it.isNotEmpty() }
+                ?.let { "diplomes absents du profil (${it.joinToString(", ")})" },
+            rapport.chiffresSuspects.takeIf { it.isNotEmpty() }
+                ?.let { "chiffres non presents dans le profil (${it.joinToString(", ")})" },
+            (
+                "accroche tournee vers ce que vous cherchez plutot que vers ce que " +
+                    "vous apportez"
+                ).takeIf { rapport.accrocheParleDeRecherche },
+            "lettre qui resume l'annonce au lieu de s'y adresser"
+                .takeIf { rapport.lettreResumeLAnnonce },
+            "lettre qui annonce un plan pour les premiers mois"
+                .takeIf { rapport.lettreProjetteLesPremiersMois },
+        )
+        val avertissement = constats.takeIf { it.isNotEmpty() }?.let {
+            "Verification automatique : " + it.joinToString(" ; ") +
+                ". Verifiez-les avant d'envoyer."
+        }
 
         return Corrigee(cv, lettre, revue, avertissement)
     }
@@ -489,6 +499,25 @@ class Orchestrator(
                 add(Probleme("important", "accroche",
                     "Le CV emploie la premiere personne",
                     "Reformuler sans \"je\" ni \"mon\""))
+            }
+            if (rapport.accrocheParleDeRecherche) {
+                add(Probleme("bloquant", "accroche",
+                    "L'accroche dit ce que le candidat cherche au lieu de ce qu'il apporte",
+                    "Reecrire l'accroche sur ce qu'il sait faire et l'a deja fait. " +
+                        "Retirer toute mention de contrat, de duree ou de poste recherche : " +
+                        "le recruteur sait ce qu'il propose"))
+            }
+            if (rapport.lettreResumeLAnnonce) {
+                add(Probleme("bloquant", "lettre",
+                    "Le premier paragraphe decrit le poste au lieu de s'adresser au recruteur",
+                    "Remplacer par une raison precise de postuler chez eux, tiree de " +
+                        "l'annonce. Le recruteur a ecrit l'annonce, on ne la lui resume pas"))
+            }
+            if (rapport.lettreProjetteLesPremiersMois) {
+                add(Probleme("bloquant", "lettre",
+                    "La lettre annonce ce qui sera fait dans les premiers mois",
+                    "Supprimer ce paragraphe. Personne n'ecrit de plan d'integration dans " +
+                        "une lettre, et cela presume du poste avant de l'avoir obtenu"))
             }
             if (rapport.puceTropLongues > 0) {
                 add(Probleme("mineur", "experience",

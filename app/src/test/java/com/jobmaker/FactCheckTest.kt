@@ -120,6 +120,94 @@ class FactCheckTest {
             rapport.chiffresSuspects.contains("120"))
     }
 
+    // -----------------------------------------------------------------------
+    // Les trois marques de machine
+    //
+    // Reprises d'une vraie candidature produite par l'application : un CV dont
+    // l'accroche disait ce que le candidat cherchait, et une lettre qui ouvrait
+    // en resumant l'annonce puis annoncait un plan pour les premiers mois. Les
+    // trois venaient des consignes elles-memes, qui les demandaient.
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `une accroche qui dit ce que le candidat cherche est signalee`() {
+        val cv = cvFidele.copy(
+            accroche = "Professionnel de la logistique, rigoureux et organise. " +
+                "Recherche un CDD junior ou les competences relationnelles sont centrales.",
+        )
+        assertTrue(FactCheck.verifier(profil, offre, cv, LetterContent())
+            .accrocheParleDeRecherche)
+    }
+
+    @Test
+    fun `une accroche tournee vers l'apport passe sans alerte`() {
+        val cv = cvFidele.copy(
+            accroche = "Magasinier habitue a la preparation de commandes et a la " +
+                "coordination d'equipe. Ecoute et mediation acquises en entrepot.",
+        )
+        val rapport = FactCheck.verifier(profil, offre, cv, LetterContent())
+        assertFalse(rapport.accrocheParleDeRecherche)
+    }
+
+    @Test
+    fun `le mot recherche dans son sens normal ne declenche rien`() {
+        // "recherche de solutions" est une competence, pas une demande d'emploi.
+        val cv = cvFidele.copy(
+            accroche = "Magasinier oriente recherche de solutions et amelioration continue.",
+        )
+        assertFalse(FactCheck.verifier(profil, offre, cv, LetterContent())
+            .accrocheParleDeRecherche)
+    }
+
+    @Test
+    fun `un premier paragraphe qui decrit le poste est signale`() {
+        val lettre = LetterContent(
+            paragraphes = listOf(
+                "Le dispositif de mediation en sante mentale requiert une capacite a " +
+                    "instaurer un climat de confiance et a faciliter le dialogue.",
+                "Chez CapTrain, j'ai assure la reception et le tri de trains de fret.",
+            )
+        )
+        assertTrue(FactCheck.verifier(profil, offre, cvFidele, lettre).lettreResumeLAnnonce)
+    }
+
+    @Test
+    fun `un premier paragraphe qui parle du candidat passe`() {
+        val lettre = LetterContent(
+            paragraphes = listOf(
+                "Votre maraude aupres des personnes sans abri rejoint ce que je fais " +
+                    "depuis deux ans en benevolat, et c'est pour cela que je postule.",
+            )
+        )
+        assertFalse(FactCheck.verifier(profil, offre, cvFidele, lettre).lettreResumeLAnnonce)
+    }
+
+    @Test
+    fun `un plan pour les premiers mois est signale`() {
+        val lettre = LetterContent(
+            paragraphes = listOf(
+                "Votre approche de terrain me parle.",
+                "Dans les premiers mois, je pourrai mettre a profit mon experience de " +
+                    "coordination pour accompagner les usagers.",
+            )
+        )
+        assertTrue(FactCheck.verifier(profil, offre, cvFidele, lettre)
+            .lettreProjetteLesPremiersMois)
+    }
+
+    @Test
+    fun `une lettre sans plan d'integration passe`() {
+        val lettre = LetterContent(
+            paragraphes = listOf(
+                "Votre approche de terrain me parle.",
+                "Chez CapTrain, j'ai coordonne les envois avec le poste de controle.",
+                "Je reste disponible pour en echanger.",
+            )
+        )
+        assertFalse(FactCheck.verifier(profil, offre, cvFidele, lettre)
+            .lettreProjetteLesPremiersMois)
+    }
+
     @Test
     fun `un chiffre isole en fin de ligne n'est pas signale`() {
         // Vu sur telephone : le bandeau annonçait "chiffres non presents dans le

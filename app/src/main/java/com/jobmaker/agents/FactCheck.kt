@@ -34,6 +34,16 @@ object FactCheck {
         val puceSansVerbe: Int,
         val premierePersonneDansCv: Boolean,
         val motsLettre: Int,
+        /**
+         * L'accroche dit ce que le candidat cherche au lieu de ce qu'il apporte.
+         * C'est la premiere ligne lue d'un CV : elle doit se lire comme une offre,
+         * pas comme une demande.
+         */
+        val accrocheParleDeRecherche: Boolean,
+        /** Un paragraphe de la lettre resume l'annonce au lieu de s'adresser a elle. */
+        val lettreResumeLAnnonce: Boolean,
+        /** Un paragraphe annonce ce qui sera fait "dans les premiers mois". */
+        val lettreProjetteLesPremiersMois: Boolean,
     ) {
         /** Couverture des mots-cles, de 0 a 100. */
         val scoreAts: Int
@@ -42,9 +52,15 @@ object FactCheck {
                 return if (total == 0) 100 else (motsClesCouverts.size * 100) / total
             }
 
+        /**
+         * Ce qui justifie de relancer une passe de correction. Les trois marques
+         * de machine y figurent : elles ne sont pas des mensonges, mais elles
+         * font jeter la candidature aussi surement.
+         */
         val aDesAlertes: Boolean
             get() = organisationsSuspectes.isNotEmpty() || chiffresSuspects.isNotEmpty() ||
-                diplomesSuspects.isNotEmpty()
+                diplomesSuspects.isNotEmpty() || accrocheParleDeRecherche ||
+                lettreResumeLAnnonce || lettreProjetteLesPremiersMois
     }
 
     fun verifier(profile: Profile, analyse: JobAnalysis, cv: CvContent, lettre: LetterContent): Rapport {
@@ -122,6 +138,24 @@ object FactCheck {
         val premierePersonne = Regex("\\b(je|j'ai|mon|ma|mes|moi)\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(cv.accroche + " " + puces.joinToString(" "))
 
+        // --- les trois marques de machine ---
+        // Les consignes les interdisent ; ceci verifie qu'elles ont ete suivies.
+        // Un modele obeit la plupart du temps, pas toujours, et ces trois defauts
+        // se voient a la premiere ligne par quelqu'un qui lit des candidatures
+        // toute la journee.
+        val accrocheNormalisee = normaliser(cv.accroche)
+        val accrocheCherche = MOTIFS_RECHERCHE.any { it.containsMatchIn(accrocheNormalisee) }
+
+        val premierParagraphe = normaliser(lettre.paragraphes.firstOrNull().orEmpty())
+        // Un paragraphe qui decrit le poste ne parle jamais du candidat : pas de
+        // premiere personne, et un verbe d'exigence. Les deux ensemble suffisent.
+        val resumeAnnonce = premierParagraphe.isNotBlank() &&
+            !Regex("\\b(je|j |mon|ma|mes|moi|nous)\\b").containsMatchIn(premierParagraphe) &&
+            MOTIFS_DESCRIPTION.any { it.containsMatchIn(premierParagraphe) }
+
+        val lettreNormalisee = normaliser(lettre.paragraphes.joinToString(" "))
+        val projection = MOTIFS_PROJECTION.any { it.containsMatchIn(lettreNormalisee) }
+
         return Rapport(
             organisationsSuspectes = orgsSuspectes,
             chiffresSuspects = chiffresSuspects,
@@ -132,6 +166,9 @@ object FactCheck {
             puceSansVerbe = sansVerbe,
             premierePersonneDansCv = premierePersonne,
             motsLettre = lettreTexte.split(Regex("\\s+")).count { it.isNotBlank() },
+            accrocheParleDeRecherche = accrocheCherche,
+            lettreResumeLAnnonce = resumeAnnonce,
+            lettreProjetteLesPremiersMois = projection,
         )
     }
 
@@ -167,6 +204,33 @@ object FactCheck {
         appendLine(profile.permis.joinToString(" "))
         appendLine(profile.centresInteret.joinToString(" "))
     }
+
+    /**
+     * Une accroche qui annonce ce que le candidat veut obtenir. Les motifs sont
+     * volontairement etroits : "recherche" seul apparait legitimement ailleurs
+     * ("recherche de solutions"), c'est la tournure complete qui trahit.
+     */
+    private val MOTIFS_RECHERCHE = listOf(
+        Regex("\\b(recherche|cherche) (un|une|des|actuellement|a )"),
+        Regex("\\ba la recherche d"),
+        Regex("\\ben recherche d"),
+        Regex("\\bsouhaite (integrer|rejoindre|obtenir|evoluer|me reconvertir)"),
+        Regex("\\bdisponible pour un (cdd|cdi|contrat|poste)"),
+    )
+
+    /** Verbes par lesquels on decrit un poste a celui qui l'a redige. */
+    private val MOTIFS_DESCRIPTION = listOf(
+        Regex("\\b(requiert|necessite|exige|implique|suppose|demande de)\\b"),
+        Regex("\\b(consiste a|repose sur|s articule autour)\\b"),
+    )
+
+    /** Le plan d'integration que personne n'ecrit dans une vraie lettre. */
+    private val MOTIFS_PROJECTION = listOf(
+        Regex("\\b(premiers mois|premieres semaines|premiers jours)\\b"),
+        Regex("\\bdes (mon|ma) (arrivee|prise de (poste|fonction)|integration)\\b"),
+        Regex("\\bje pourrai (mettre a profit|apporter|contribuer|assurer)"),
+        Regex("\\bdans un premier temps, je\\b"),
+    )
 
     /** Minuscules, sans accents, sans ponctuation, espaces normalises. */
     fun normaliser(texte: String): String =
