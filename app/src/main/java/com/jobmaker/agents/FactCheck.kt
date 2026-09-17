@@ -153,13 +153,21 @@ object FactCheck {
             !Regex("\\b(je|j |mon|ma|mes|moi|nous)\\b").containsMatchIn(premierParagraphe) &&
             MOTIFS_DESCRIPTION.any { it.containsMatchIn(premierParagraphe) }
 
-        // La conclusion a le droit au futur -- "je reste disponible", "je pourrai
-        // vous rencontrer" -- donc on ne l'inspecte pas. Ce sont les paragraphes
-        // du corps qui ne doivent rien promettre.
-        val corps = lettre.paragraphes.dropLast(1)
+        // Un plan reste un plan ou qu'il soit : "dans les premiers mois", "je
+        // compte", une liste numerotee sont cherches dans toute la lettre, y
+        // compris le dernier paragraphe -- sans quoi il suffirait d'y deplacer la
+        // promesse pour passer le controle.
+        //
+        // Seules "je pourrai" et "je serai" echappent a l'inspection dans le
+        // dernier paragraphe : c'est ainsi qu'une conclusion propose une
+        // rencontre, et les y interdire ferait plus de faux positifs que de bien.
+        val toutes = lettre.paragraphes
+        val corps = toutes.dropLast(1)
+        val touteLaLettre = normaliser(toutes.joinToString(" "))
         val corpsNormalise = normaliser(corps.joinToString(" "))
-        val projection = MOTIFS_PROJECTION.any { it.containsMatchIn(corpsNormalise) } ||
-            MOTIF_PLAN_NUMEROTE.containsMatchIn(corps.joinToString(" "))
+        val projection = MOTIFS_PROJECTION.any { it.containsMatchIn(touteLaLettre) } ||
+            MOTIFS_FUTUR_HORS_CONCLUSION.any { it.containsMatchIn(corpsNormalise) } ||
+            MOTIF_PLAN_NUMEROTE.containsMatchIn(toutes.joinToString(" "))
 
         return Rapport(
             organisationsSuspectes = orgsSuspectes,
@@ -244,12 +252,21 @@ object FactCheck {
         Regex("\\bdes (mon|ma|la) (arrivee|prise de (poste|fonction)|integration)\\b"),
         Regex("\\bdans un premier temps,? je\\b"),
         // Le futur et le conditionnel a la premiere personne, sur le travail.
-        Regex("\\bje (compte|pourrai|saurai|veillerai|assurerai|mettrai|apporterai|" +
-            "deploierai|proposerai|commencerai|organiserai|contribuerai|prendrai)\\b"),
+        Regex("\\bje (compte|veillerai|assurerai|mettrai|apporterai|deploierai|" +
+            "proposerai|commencerai|organiserai|contribuerai|prendrai)\\b"),
         Regex("\\bj (assurerai|apporterai|organiserai|aurai)\\b"),
         Regex("\\b(cela|ceci|cette approche|mon approche|ma methode|cette methode) " +
             "(me |m )?permettra\\b"),
-        Regex("\\bje serai (en mesure|amene)\\b"),
+    )
+
+    /**
+     * Les deux tournures qu'une conclusion emploie legitimement -- "je pourrai
+     * vous rencontrer", "je serai disponible" -- et qui, ailleurs dans la lettre,
+     * annoncent une promesse. Elles ne sont donc cherchees que dans le corps.
+     */
+    private val MOTIFS_FUTUR_HORS_CONCLUSION = listOf(
+        Regex("\\bje pourrai\\b"),
+        Regex("\\bje (serai|saurai)\\b"),
     )
 
     /**
