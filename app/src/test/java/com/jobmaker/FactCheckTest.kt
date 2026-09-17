@@ -121,6 +121,35 @@ class FactCheckTest {
     }
 
     @Test
+    fun `un chiffre isole en fin de ligne n'est pas signale`() {
+        // Vu sur telephone : le bandeau annonçait "chiffres non presents dans le
+        // profil (1" suivi d'un retour a la ligne. Le motif d'extraction accepte
+        // les blancs, et seul l'espace etait retire : un "1" en fin de puce
+        // ressortait "1\n", donc deux caracteres, donc echappait a la regle qui
+        // ignore les nombres d'un seul chiffre.
+        val cv = cvFidele.copy(
+            experiences = listOf(
+                cvFidele.experiences[0].copy(
+                    puces = listOf(
+                        "Travailler en equipe de 3",
+                        "Gerer le magasin niveau 1",
+                    )
+                )
+            )
+        )
+        val rapport = FactCheck.verifier(profil, offre, cv, LetterContent())
+        assertTrue(
+            "aucun chiffre a un seul caractere ne doit sortir : " +
+                "${rapport.chiffresSuspects}",
+            rapport.chiffresSuspects.none { it.trim().length <= 1 },
+        )
+        assertTrue(
+            "aucun blanc ne doit subsister : ${rapport.chiffresSuspects}",
+            rapport.chiffresSuspects.none { c -> c.any { it.isWhitespace() } },
+        )
+    }
+
+    @Test
     fun `les annees ne sont pas prises pour des chiffres inventes`() {
         val cv = cvFidele.copy(
             experiences = listOf(cvFidele.experiences[0].copy(periode = "2019 - 2020"))

@@ -215,7 +215,13 @@ object FactCheck {
 
     private fun extraireNombres(texte: String): List<String> =
         Regex("\\d[\\d\\s.,]*%?").findAll(texte)
-            .map { it.value.replace(" ", "").trim('.', ',') }
+            // Tous les blancs, pas seulement l'espace : le motif accepte \s, donc
+            // un "1" en fin de ligne ressortait "1\n". Le retour a la ligne
+            // survivait, la chaine faisait deux caracteres, et le garde-fou
+            // "un seul chiffre = trop de faux positifs" ne s'appliquait plus.
+            // Resultat : un "1" anodin signale comme chiffre invente, retour a
+            // la ligne compris, dans le bandeau d'avertissement.
+            .map { m -> m.value.filterNot { it.isWhitespace() }.trim('.', ',') }
             .filter { brut ->
                 val nu = brut.removeSuffix("%")
                 val valeur = nu.replace(",", ".").toDoubleOrNull()
