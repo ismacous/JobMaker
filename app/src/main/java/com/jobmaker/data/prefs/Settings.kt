@@ -35,6 +35,11 @@ data class Settings(
     /** Modele choisi chez chaque fournisseur. Absent = modele par defaut. */
     val modeleCloud: Map<FournisseurCloud, String> = emptyMap(),
     /**
+     * Modele plus petit reserve a l'etape de preparation, par fournisseur.
+     * Vide = le meme modele aux trois etapes.
+     */
+    val modeleCloudLeger: Map<FournisseurCloud, String> = emptyMap(),
+    /**
      * Passe au fournisseur suivant quand celui en cours sature, au lieu de
      * rendre la main au telephone pendant qu'une autre cle dort.
      */
@@ -79,6 +84,9 @@ data class Settings(
 
     fun modeleCloudPour(f: FournisseurCloud): String =
         modeleCloud[f]?.takeIf { it.isNotBlank() } ?: f.modeleParDefaut
+
+    fun modeleLegerPour(f: FournisseurCloud): String =
+        modeleCloudLeger[f]?.takeIf { it.isNotBlank() }.orEmpty()
 }
 
 /** Projette les reglages sur ce dont la fabrique de moteurs a besoin. */
@@ -86,6 +94,7 @@ fun Settings.configMoteur() = ConfigMoteur(
     mode = modeMoteur,
     fournisseur = fournisseurCloud,
     modelesCloud = modeleCloud,
+    modelesLegers = modeleCloudLeger,
     enchainerFournisseurs = enchainerFournisseurs,
     repliLocal = repliLocal,
     modeleParRole = modeleParRole,
@@ -106,12 +115,16 @@ class SettingsRepository(private val context: Context) {
         val modelesCloud = FournisseurCloud.entries.mapNotNull { f ->
             this[modeleCloudKey(f)]?.takeIf { it.isNotBlank() }?.let { f to it }
         }.toMap()
+        val modelesLegers = FournisseurCloud.entries.mapNotNull { f ->
+            this[modeleLegerKey(f)]?.takeIf { it.isNotBlank() }?.let { f to it }
+        }.toMap()
         return Settings(
             modeMoteur = runCatching {
                 ModeMoteur.valueOf(this[KEY_MODE_MOTEUR] ?: ModeMoteur.CLOUD.name)
             }.getOrDefault(ModeMoteur.CLOUD),
             fournisseurCloud = FournisseurCloud.parNom(this[KEY_FOURNISSEUR]),
             modeleCloud = modelesCloud,
+            modeleCloudLeger = modelesLegers,
             enchainerFournisseurs = this[KEY_ENCHAINER] ?: true,
             repliLocal = this[KEY_REPLI_LOCAL] ?: true,
             modeleParRole = roles,
@@ -141,6 +154,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setModeleCloud(fournisseur: FournisseurCloud, modele: String) =
         context.dataStore.edit { it[modeleCloudKey(fournisseur)] = modele.trim() }
+
+    suspend fun setModeleLeger(fournisseur: FournisseurCloud, modele: String) =
+        context.dataStore.edit { it[modeleLegerKey(fournisseur)] = modele.trim() }
 
     suspend fun setRepliLocal(value: Boolean) =
         context.dataStore.edit { it[KEY_REPLI_LOCAL] = value }
@@ -198,5 +214,9 @@ class SettingsRepository(private val context: Context) {
          *  modele choisi chez le precedent. */
         fun modeleCloudKey(f: FournisseurCloud) =
             stringPreferencesKey("modele_cloud_${f.name}")
+
+        /** Modele leger de l'etape de preparation, lui aussi par fournisseur. */
+        fun modeleLegerKey(f: FournisseurCloud) =
+            stringPreferencesKey("modele_leger_${f.name}")
     }
 }

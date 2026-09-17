@@ -23,6 +23,15 @@ class MoteurCloud(
     private val client: ClientCloud,
     val fournisseur: FournisseurCloud,
     private val modele: String,
+    /**
+     * Modele plus petit pour la preparation. Vide = le modele principal partout.
+     *
+     * La preparation produit une extraction structuree de l'annonce ; c'est la
+     * seule des trois etapes dont la sortie est consommee par le pipeline et non
+     * lue par un humain. Un modele intermediaire y tient, et cela epargne le
+     * budget par minute du gros modele pour la redaction et la revision.
+     */
+    private val modeleLeger: String = "",
     /** Fournie a l'appel, jamais conservee en clair sur le disque. */
     private val cle: String,
     /** Remonte a l'ecran ce que l'utilisateur doit savoir pendant la generation. */
@@ -38,6 +47,14 @@ class MoteurCloud(
     private val modeleRetenu = modele.ifBlank { fournisseur.modeleParDefaut }
 
     /**
+     * Le modele que servira le prochain appel. Pose par [preparer], lu par
+     * [completer] : l'orchestrateur appelle toujours les deux d'affilee pour une
+     * meme etape.
+     */
+    @Volatile
+    private var modeleCourant = modeleRetenu
+
+    /**
      * L'attente du quota n'est signalee qu'une fois par generation. Elle se
      * repete a chaque etape sur les offres gratuites les plus serrees, et
      * quatre bandeaux identiques n'apprennent rien de plus que le premier.
@@ -49,14 +66,20 @@ class MoteurCloud(
 
     override val distant: Boolean = true
 
-    override suspend fun preparer(role: AgentRole): MoteurPret = MoteurPret(
-        nomModele = "$modeleRetenu (${fournisseur.nom})",
-        // Les modeles servis par API ont tous au moins 32k de contexte : le
-        // profil complet passe toujours, on ne resume donc jamais.
-        tailleContexte = CONTEXTE_SUPPOSE,
-        // Les API rendent le texte final sans bloc de raisonnement.
-        brideRaisonnement = false,
-    )
+    override suspend fun preparer(role: AgentRole): MoteurPret {
+        modeleCourant = when (role) {
+            AgentRole.ANALYSIS, AgentRole.STRATEGY -> modeleLeger.ifBlank { modeleRetenu }
+            else -> modeleRetenu
+        }
+        return MoteurPret(
+            nomModele = "$modeleCourant (${fournisseur.nom})",
+            // Les modeles servis par API ont tous au moins 32k de contexte : le
+            // profil complet passe toujours, on ne resume donc jamais.
+            tailleContexte = CONTEXTE_SUPPOSE,
+            // Les API rendent le texte final sans bloc de raisonnement.
+            brideRaisonnement = false,
+        )
+    }
 
     /**
      * Estimation, et non compte exact : demander le compte exact couterait un
@@ -78,7 +101,7 @@ class MoteurCloud(
         onLecturePrompt?.invoke(estimation, estimation, 0L)
         return client.completer(
             fournisseur = fournisseur,
-            modele = modeleRetenu,
+            modele = modeleCourant,
             cle = cle,
             messages = messages,
             params = params.copy(maxTokens = budget(params.maxTokens)),
@@ -122,7 +145,7 @@ class MoteurCloud(
      * budget d'origine.
      */
     private fun budget(demande: Int): Int =
-        if (RequetesCloud.raisonne(modeleRetenu)) (demande * 3 / 2).coerceAtMost(8192)
+        if (RequetesCloud.raisonne(modeleCourant)) (demande * 3 / 2).coerceAtMost(8192)
         else demande
 
     private companion object { const val CONTEXTE_SUPPOSE = 32_768 }

@@ -71,6 +71,7 @@ class FabriqueMoteur(
                 client = client,
                 fournisseur = f,
                 modele = config.modelePour(f),
+                modeleLeger = config.modeleLegerPour(f),
                 cle = cles.getValue(f),
                 onInfo = onAvertissement,
                 // Seul le dernier fournisseur patiente sur un quota epuise :

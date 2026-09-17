@@ -73,7 +73,11 @@ class MoteurIaViewModel(private val container: AppContainer) : ViewModel() {
         )
         buildList {
             fournisseurs.forEach { f ->
-                add("${f.nom} - ${reglages.modeleCloudPour(f)}")
+                val leger = reglages.modeleLegerPour(f)
+                add(
+                    "${f.nom} - ${reglages.modeleCloudPour(f)}" +
+                        if (leger.isNotBlank()) " (analyse : $leger)" else ""
+                )
             }
             if (reglages.repliLocal) {
                 locaux.firstOrNull()?.let { add("${it.displayName} - sur le telephone") }
@@ -100,6 +104,10 @@ class MoteurIaViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setModele(modele: String) = lance {
         container.settingsRepository.setModeleCloud(reglages.value.fournisseurCloud, modele)
+    }
+
+    fun setModeleLeger(modele: String) = lance {
+        container.settingsRepository.setModeleLeger(reglages.value.fournisseurCloud, modele)
     }
 
     fun setRepliLocal(actif: Boolean) = lance {

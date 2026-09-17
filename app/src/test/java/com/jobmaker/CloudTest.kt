@@ -2,6 +2,7 @@ package com.jobmaker
 
 import com.jobmaker.llm.ChaineMoteurs
 import com.jobmaker.llm.ChatMessage
+import com.jobmaker.llm.ConfigMoteur
 import com.jobmaker.llm.GenerationParams
 import com.jobmaker.llm.cloud.DialecteCloud
 import com.jobmaker.llm.cloud.ErreurCloud
@@ -372,6 +373,22 @@ class CloudTest {
         // Google n'envoie pas ces en-tetes : mieux vaut ne rien afficher qu'un
         // chiffre invente.
         assertNull(QuotaObserve().resume())
+    }
+
+    @Test
+    fun `le modele leger reste facultatif`() {
+        // Vide par defaut : le meme modele aux trois etapes, comme avant.
+        val sans = ConfigMoteur()
+        assertEquals("", sans.modeleLegerPour(FournisseurCloud.GROQ))
+
+        val avec = ConfigMoteur(
+            modelesCloud = mapOf(FournisseurCloud.GROQ to "openai/gpt-oss-120b"),
+            modelesLegers = mapOf(FournisseurCloud.GROQ to "openai/gpt-oss-20b"),
+        )
+        assertEquals("openai/gpt-oss-120b", avec.modelePour(FournisseurCloud.GROQ))
+        assertEquals("openai/gpt-oss-20b", avec.modeleLegerPour(FournisseurCloud.GROQ))
+        // Le reglage est par fournisseur : rien ne fuit vers les autres.
+        assertEquals("", avec.modeleLegerPour(FournisseurCloud.GEMINI))
     }
 
     @Test

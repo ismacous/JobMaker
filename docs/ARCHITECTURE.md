@@ -152,6 +152,31 @@ Le cache reste une optimisation opportuniste : tous les modèles ne le proposent
 pas, et le premier appel paie plein tarif. Il ne remplace donc pas la réduction
 du nombre d'appels, il s'y ajoute.
 
+### Un modèle par étape, parce que les quotas sont par modèle
+
+Les trois appels d'une candidature n'ont pas besoin de la même capacité, et
+surtout : **les quotas gratuits se comptent par modèle**. Déplacer une étape vers
+un autre modèle ne consomme pas moins de tokens — le compte est identique — mais
+les prend dans une autre réserve, ce qui laisse le budget par minute du gros
+modèle entier pour les étapes où la différence se voit.
+
+`MoteurCloud` choisit donc selon `AgentRole` : l'étape de préparation peut aller
+à un modèle plus petit, la rédaction et la révision gardent le principal. Vide
+par défaut — même modèle partout, comportement inchangé.
+
+L'abstraction existait déjà pour le moteur embarqué (`modeleParRole`, écran
+*Modèles par étape*) ; `MoteurCloud` ignorait simplement le rôle.
+
+Pourquoi la préparation et pas une autre : c'est la seule des trois dont la sortie
+n'est pas lue par l'utilisateur mais consommée par le pipeline, sous forme
+structurée. Ce n'est pas pour autant une étape négligeable — c'est elle qui décide
+de la stratégie, donc de ce que le CV met en avant. Un modèle intermédiaire y
+tient ; un très petit dégraderait tout l'aval.
+
+À noter : cela coûte un cache de prompt. Le préfixe partagé n'est plus commun
+qu'aux deux étapes restées sur le gros modèle, la préparation payant le sien. Le
+compromis reste favorable quand c'est le quota par minute qui bloque.
+
 ### JSON contraint par l'API quand elle sait le faire
 
 En local, le JSON produit par un modèle de 4 milliards de paramètres est

@@ -78,6 +78,7 @@ fun MoteurIaScreen(
     val fournisseur = reglages.fournisseurCloud
     val empreinte = empreintes[fournisseur]
     var choixModeleOuvert by remember { mutableStateOf(false) }
+    var choixLegerOuvert by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -245,6 +246,51 @@ fun MoteurIaScreen(
                 }
 
                 // -------------------------------------------------------------
+                // Modele leger : repartir la charge entre deux quotas
+                // -------------------------------------------------------------
+                SectionCarte(
+                    "Modele leger pour l'analyse",
+                    sousTitre = "Facultatif. Repartit la charge sur deux quotas",
+                    replierParDefaut = reglages.modeleLegerPour(fournisseur).isBlank(),
+                ) {
+                    val leger = reglages.modeleLegerPour(fournisseur)
+                    Text(
+                        leger.ifBlank { "Aucun : le meme modele aux trois etapes" },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Bandeau(
+                        "Une candidature demande trois appels : analyse, redaction, " +
+                            "revision. Les quotas gratuits sont comptes PAR MODELE. " +
+                            "Confier l'analyse a un modele plus petit ne consomme pas " +
+                            "moins de tokens -- le compte est le meme -- mais les prend " +
+                            "dans une autre reserve, ce qui laisse le budget par minute " +
+                            "du gros modele entier pour les deux etapes ou la difference " +
+                            "se voit.\n\n" +
+                            "L'analyse est la seule des trois dont la sortie n'est pas " +
+                            "lue par vous : elle sert au pipeline. Un modele " +
+                            "intermediaire y tient. N'y mettez pas un tres petit modele " +
+                            "pour autant : c'est cette etape qui decide de la strategie, " +
+                            "donc de ce que le CV met en avant.",
+                        TypeBandeau.INFO,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                vm.rafraichirModeles()
+                                choixLegerOuvert = true
+                            },
+                            enabled = !etat.chargementModeles,
+                        ) { Text(if (leger.isBlank()) "Choisir" else "Changer") }
+                        if (leger.isNotBlank()) {
+                            TextButton(onClick = { vm.setModeleLeger("") }) {
+                                Text("Retirer")
+                            }
+                        }
+                    }
+                }
+
+                // -------------------------------------------------------------
                 // Verification
                 // -------------------------------------------------------------
                 SectionCarte("Verification") {
@@ -398,6 +444,21 @@ fun MoteurIaScreen(
                 choixModeleOuvert = false
             },
             onFermer = { choixModeleOuvert = false },
+        )
+    }
+
+    if (choixLegerOuvert) {
+        DialogueChoixModele(
+            modeles = etat.modeles,
+            courant = reglages.modeleLegerPour(fournisseur)
+                .ifBlank { reglages.modeleCloudPour(fournisseur) },
+            chargement = etat.chargementModeles,
+            erreur = etat.erreur,
+            onChoisir = {
+                vm.setModeleLeger(it)
+                choixLegerOuvert = false
+            },
+            onFermer = { choixLegerOuvert = false },
         )
     }
 }

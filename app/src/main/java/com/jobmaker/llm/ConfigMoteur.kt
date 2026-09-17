@@ -28,6 +28,18 @@ data class ConfigMoteur(
     /** Modele retenu chez chaque fournisseur. Absent = modele par defaut. */
     val modelesCloud: Map<FournisseurCloud, String> = emptyMap(),
     /**
+     * Modele plus petit, facultatif, reserve a l'etape de preparation.
+     *
+     * L'interet n'est pas de consommer moins de tokens -- le compte est le meme
+     * -- mais de ne pas tous les prendre au meme endroit : les quotas sont par
+     * modele. Deplacer la preparation ailleurs laisse le budget par minute du
+     * gros modele entier pour la redaction et la revision, les deux etapes ou la
+     * difference se voit.
+     *
+     * Vide = le meme modele partout, comme avant.
+     */
+    val modelesLegers: Map<FournisseurCloud, String> = emptyMap(),
+    /**
      * Passe au fournisseur suivant quand celui en cours sature, plutot que de
      * rendre la main au telephone alors qu'une autre cle attend sans servir.
      */
@@ -45,6 +57,10 @@ data class ConfigMoteur(
 ) {
     fun modelePour(f: FournisseurCloud): String =
         modelesCloud[f]?.takeIf { it.isNotBlank() } ?: f.modeleParDefaut
+
+    /** Vide quand aucun modele leger n'est configure pour ce fournisseur. */
+    fun modeleLegerPour(f: FournisseurCloud): String =
+        modelesLegers[f]?.takeIf { it.isNotBlank() }.orEmpty()
 }
 
 /**
